@@ -80,6 +80,11 @@ octocrab-cli achievements show | boost --yes      # profile enrichment, first re
                                                   # + YOLO), stars, gist
 octocrab-cli setup --yes --org <login>            # one-shot wizard
 octocrab-cli api <route>                          # raw GET passthrough
+octocrab-cli api --method PUT <route>             # module-gated write verbs
+                                                  # (--data '{"k":"v"}', gate:
+                                                  # /orgs→org:write,
+                                                  # /actions→workflow:write,
+                                                  # else repo:write)
 octocrab-cli status --json                        # machine summary (web control center)
 ```
 
