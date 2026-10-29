@@ -145,8 +145,13 @@ enum AuthCmd {
     /// Remove all tokens and capability data
     Clear,
     /// git credential-helper bridge — lets git push/pull authenticate
-    /// straight from the encrypted vault (token never hits argv/env/URL)
-    GitCredential,
+    /// straight from the encrypted vault (token never hits argv/env/URL).
+    /// Git appends the operation (get/store/erase) itself.
+    GitCredential {
+        /// operation appended by git (get | store | erase)
+        #[arg(default_value = "get")]
+        op: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -434,7 +439,7 @@ async fn main() -> Result<()> {
             AuthCmd::Check { json } => auth::check(json).await,
             AuthCmd::Tokens => auth::tokens().await,
             AuthCmd::Clear => auth::clear().await,
-            AuthCmd::GitCredential => auth::git_credential(),
+            AuthCmd::GitCredential { op } => auth::git_credential(&op),
         },
         Cmd::Me { json } => misc::me(json).await,
         Cmd::Modules { cmd } => match cmd {

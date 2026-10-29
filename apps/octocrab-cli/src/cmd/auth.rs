@@ -180,7 +180,13 @@ pub fn open_client() -> Result<(SuiteDb, std::sync::Arc<Octocrab>)> {
 /// The token never appears in argv, env vars, the remote URL, `.git/config`
 /// or shell history — it flows vault → helper stdout pipe → git only.
 /// Only `https://github.com` is served; everything else is refused.
-pub fn git_credential() -> Result<()> {
+/// `store`/`erase` are accepted but intentionally no-ops: the vault is the
+/// single source of truth and git must never persist (or wipe) the token.
+pub fn git_credential(op: &str) -> Result<()> {
+    if op != "get" {
+        return Ok(()); // store/erase: no-op, vault stays authoritative
+    }
+
     let mut request = String::new();
     std::io::stdin().read_to_string(&mut request)?;
 
