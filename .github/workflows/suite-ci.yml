@@ -12,14 +12,20 @@ on:
         default: "hello from octocrab-cli"
 
 jobs:
-  build:
+  check:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Say hello
-        run: echo "octocrab suite: "octocrab suite: ${GITHUB_EVENT_NAME:-dispatch} event""
+        run: echo "octocrab suite: ${GITHUB_EVENT_NAME:-dispatch} event"
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+      - name: Check workspace (CLI + core + egui UI; Tauri needs the local sysroot)
+        run: cargo check --workspace --exclude octocrab-tauri
       - name: Probe system
         run: uname -a && date -u
       - name: Final check
-        run: echo "all steps observed by octocrab-cli workflows watch"
+        run: echo "workspace checked — all steps observed by octocrab-cli workflows watch"

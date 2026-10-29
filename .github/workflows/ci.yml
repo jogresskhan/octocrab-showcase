@@ -1,4 +1,4 @@
-name: Suite CI
+name: Smoke CI
 
 on:
   push:
@@ -12,13 +12,13 @@ on:
         default: "hello from octocrab-cli"
 
 jobs:
-  build:
+  smoke:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Say hello
-        run: echo "octocrab suite: "octocrab suite: ${GITHUB_EVENT_NAME:-dispatch} event""
+        run: echo "octocrab suite: ${GITHUB_EVENT_NAME:-dispatch} event"
       - name: Probe system
         run: uname -a && date -u
       - name: Final check
