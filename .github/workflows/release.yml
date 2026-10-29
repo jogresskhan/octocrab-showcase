@@ -38,7 +38,7 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
       - name: Build release binaries
-        run: cargo build --release --target ${{ matrix.target }} --exclude octocrab-tauri
+        run: cargo build --release --target ${{ matrix.target }} --workspace --exclude octocrab-tauri
       - name: Package bundle
         shell: bash
         run: |
