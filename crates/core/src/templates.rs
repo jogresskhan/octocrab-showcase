@@ -272,7 +272,7 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
       - name: Build release binaries
-        run: cargo build --release --target ${{ matrix.target }}@EXCLUDE_FLAGS@
+        run: cargo build --release --target ${{ matrix.target }} --workspace@EXCLUDE_FLAGS@
       - name: Package bundle
         shell: bash
         run: |
