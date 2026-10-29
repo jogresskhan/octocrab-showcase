@@ -101,10 +101,18 @@ enum Cmd {
         #[command(subcommand)]
         cmd: DbCmd,
     },
-    /// Raw GET against any GitHub API route (module-gated by the token)
+    /// Raw API passthrough for any route (module-gated by the token).
+    /// Write verbs are gated: /orgs → org:write, /actions → workflow:write,
+    /// everything else → repo:write.
     Api {
         /// route, e.g. "repos/owner/repo" (leading slash optional)
         route: String,
+        /// HTTP verb (default GET)
+        #[arg(long, default_value = "GET")]
+        method: String,
+        /// JSON request body for write verbs
+        #[arg(long)]
+        data: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -518,7 +526,7 @@ async fn main() -> Result<()> {
             DbCmd::Path => misc::db_info(true).await,
             DbCmd::Info => misc::db_info(false).await,
         },
-        Cmd::Api { route, json } => misc::api_raw(route, json).await,
+        Cmd::Api { route, method, data, json } => misc::api_call(route, method, data, json).await,
         Cmd::Status { json } => misc::status(json).await,
     }
 }

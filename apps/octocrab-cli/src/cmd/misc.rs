@@ -93,17 +93,79 @@ pub async fn status(json: bool) -> Result<()> {
     Ok(())
 }
 
-/// Raw GET passthrough for any API route (`api user/repos`, `api /rate_limit`).
-pub async fn api_raw(route: String, json: bool) -> Result<()> {
-    let (_db, octo) = open_client()?;
+/// Raw API passthrough for any route and verb
+/// (`api /user/repos`, `api /rate_limit`, `api --method PUT --data '{}' /…`).
+///
+/// Write verbs are **module-gated** by the route shape:
+/// `/orgs/…` → `org:write`, `/actions/…` → `workflow:write`, else `repo:write`.
+/// The response status and body are printed; the token stays in the vault.
+pub async fn api_call(route: String, method: String, data: Option<String>, json: bool) -> Result<()> {
+    use http::Method;
+    let (db, octo) = open_client()?;
+
+    let verb = method.to_uppercase();
+    let m = match verb.as_str() {
+        "GET" => Method::GET,
+        "POST" => Method::POST,
+        "PUT" => Method::PUT,
+        "PATCH" => Method::PATCH,
+        "DELETE" => Method::DELETE,
+        other => anyhow::bail!("unsupported method '{other}' (use GET/POST/PUT/PATCH/DELETE)"),
+    };
+    let is_write = m != Method::GET;
+
+    if is_write {
+        let gate = if route.starts_with("/orgs/") {
+            "org:write"
+        } else if route.contains("/actions/") {
+            "workflow:write"
+        } else {
+            "repo:write"
+        };
+        if !db.module_enabled(gate) {
+            anyhow::bail!("write to this route needs module '{gate}' — not granted this session");
+        }
+    }
+
     let route = if route.starts_with('/') { route } else { format!("/{route}") };
-    let v = octo
-        .get::<serde_json::Value, _, _>(route.as_str(), None::<&[(&str, &str)]>)
-        .await?;
-    if json {
-        println!("{}", serde_json::to_string_pretty(&v)?);
-    } else {
-        println!("{}", serde_json::to_string_pretty(&v)?);
+    let parsed: Option<serde_json::Value> = match (&data, is_write) {
+        (Some(_), false) => anyhow::bail!("--data makes no sense with GET"),
+        (Some(raw), _) => Some(
+            serde_json::from_str(raw)
+                .map_err(|e| anyhow::anyhow!("--data is not valid JSON: {e}"))?,
+        ),
+        (None, _) => None,
+    };
+    let body = parsed.as_ref();
+
+    let resp = match m {
+        Method::GET => octo._get(route.as_str()).await?,
+        Method::POST => octo._post::<serde_json::Value>(route.as_str(), body).await?,
+        Method::PUT => octo._put::<serde_json::Value>(route.as_str(), body).await?,
+        Method::PATCH => octo._patch::<serde_json::Value>(route.as_str(), body).await?,
+        Method::DELETE => octo._delete::<serde_json::Value>(route.as_str(), body).await?,
+        _ => unreachable!(),
+    };
+
+    let status = resp.status();
+    let bytes = http_body_util::BodyExt::collect(resp.into_body())
+        .await
+        .map_err(|e| anyhow::anyhow!("reading response body: {e}"))?
+        .to_bytes();
+    let text = String::from_utf8_lossy(&bytes);
+
+    if !json {
+        eprintln!("{}", dim(&format!("→ HTTP {status}")));
+    }
+    if text.trim().is_empty() {
+        if json {
+            println!("{}", serde_json::to_string_pretty(&serde_json::json!({"status": status.as_u16()}))?);
+        }
+        return Ok(());
+    }
+    match serde_json::from_str::<serde_json::Value>(&text) {
+        Ok(v) => println!("{}", serde_json::to_string_pretty(&v)?),
+        Err(_) => println!("{text}"),
     }
     Ok(())
 }

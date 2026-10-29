@@ -22,3 +22,5 @@ clap.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
 base64.workspace = true
+http.workspace = true
+http-body-util.workspace = true

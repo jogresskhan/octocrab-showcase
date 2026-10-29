@@ -18,7 +18,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Say hello
-        run: echo "octocrab suite: ${GITHUB_EVENT_NAME:-dispatch} event"
+        run: 'echo "octocrab suite: ${GITHUB_EVENT_NAME:-dispatch} event"'
       - name: Probe system
         run: uname -a && date -u
       - name: Final check

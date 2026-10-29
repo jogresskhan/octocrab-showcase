@@ -3684,6 +3684,8 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "clap",
+ "http",
+ "http-body-util",
  "octocrab",
  "octocrab-core",
  "serde",
