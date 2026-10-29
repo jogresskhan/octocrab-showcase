@@ -1,25 +1,43 @@
-name: Smoke CI
+name: CI (octocrab-showcase)
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+  pull_request:
   workflow_dispatch:
-    inputs:
-      note:
-        description: "Dispatch note"
-        required: false
-        default: "hello from octocrab-cli"
 
 jobs:
-  smoke:
+  build:
+    name: check+test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Check workspace
+        run: cargo check --workspace --all-targets --exclude octocrab-tauri
+      - name: Test workspace
+        run: cargo test --workspace --exclude octocrab-tauri
+
+  lint:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Say hello
-        run: 'echo "octocrab suite: ${GITHUB_EVENT_NAME:-dispatch} event"'
-      - name: Probe system
-        run: uname -a && date -u
-      - name: Final check
-        run: echo "all steps observed by octocrab-cli workflows watch"
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --workspace --exclude octocrab-tauri -- -D warnings
