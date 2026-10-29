@@ -1,0 +1,83 @@
+name: Release (octocrab-showcase)
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: package (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            ext: tar.gz
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            ext: tar.gz
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            ext: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            ext: zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Build release binaries
+        run: cargo build --release --target ${{ matrix.target }} --exclude octocrab-tauri
+      - name: Package bundle
+        shell: bash
+        run: |
+          mkdir -p dist
+          for bin in octocrab-cli octocrab-ide; do
+            for cand in "target/${{ matrix.target }}/release/$bin" "target/${{ matrix.target }}/release/$bin.exe"; do
+              if [ -f "$cand" ]; then cp "$cand" dist/; fi
+            done
+          done
+          NAME="octocrab-showcase-${{ matrix.target }}"
+          if [ "${{ matrix.ext }}" = "zip" ]; then
+            tar -a -cf "$NAME.zip" -C dist .
+            echo "ASSET=$NAME.zip" >> "$GITHUB_ENV"
+          else
+            tar -czf "$NAME.tar.gz" -C dist .
+            echo "ASSET=$NAME.tar.gz" >> "$GITHUB_ENV"
+          fi
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundle-${{ matrix.target }}
+          path: ${{ env.ASSET }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect bundles
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: cd dist && sha256sum * > checksums.sha256
+      - name: Create / update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" dist/* \
+            --title "octocrab-showcase ${{ github.ref_name }}" \
+            --generate-notes \
+            || gh release upload "${{ github.ref_name }}" dist/* --clobber
