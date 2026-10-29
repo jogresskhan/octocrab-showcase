@@ -37,9 +37,18 @@ pub async fn set(label: String, stdin: bool, file: Option<String>) -> Result<()>
 
     let db = SuiteDb::open()?;
     db.set_token(&label, &token)?;
-    println!("{}", ok(&format!("token '{label}' stored (AES-256-GCM encrypted)")));
-    println!("{}", dim(&format!("vault: {}", octocrab_core::db_path().display())));
-    println!("{}", dim("run `octocrab-cli auth check` to map capabilities"));
+    println!(
+        "{}",
+        ok(&format!("token '{label}' stored (AES-256-GCM encrypted)"))
+    );
+    println!(
+        "{}",
+        dim(&format!("vault: {}", octocrab_core::db_path().display()))
+    );
+    println!(
+        "{}",
+        dim("run `octocrab-cli auth check` to map capabilities")
+    );
     Ok(())
 }
 
@@ -61,7 +70,10 @@ pub async fn status(json: bool) -> Result<()> {
     let tokens = db.list_tokens();
     if tokens.is_empty() {
         println!("{}", warn("no token stored"));
-        println!("{}", dim("  →  printf '%s' '<token>' | octocrab-cli auth set --stdin"));
+        println!(
+            "{}",
+            dim("  →  printf '%s' '<token>' | octocrab-cli auth set --stdin")
+        );
         return Ok(());
     }
     let t = Table::new(&[3, 18, 14, 22, 8]);
@@ -95,7 +107,10 @@ pub async fn check(json: bool) -> Result<()> {
     println!("{}", dim("probing token capabilities (zero side effects)…"));
     let report = caps::check(&octo, &db).await?;
     if json {
-        println!("{}", serde_json::to_string_pretty(&report.to_summary_json())?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report.to_summary_json())?
+        );
         return Ok(());
     }
     println!();
@@ -103,7 +118,14 @@ pub async fn check(json: bool) -> Result<()> {
         "identity: {} — token kind: {} — {} module(s) granted",
         bold(&report.login),
         cyan(&report.kind),
-        bold(&report.modules.iter().filter(|m| m.enabled).count().to_string())
+        bold(
+            &report
+                .modules
+                .iter()
+                .filter(|m| m.enabled)
+                .count()
+                .to_string()
+        )
     );
     if !report.scopes.is_empty() {
         println!("scopes:   {}", cyan(&report.scopes.join(", ")));
@@ -153,7 +175,11 @@ pub async fn tokens() -> Result<()> {
             bold(&t.label),
             t.kind,
             fmt_ts(t.created_at),
-            if t.active { "".to_string() } else { dim(" (inactive)") }
+            if t.active {
+                "".to_string()
+            } else {
+                dim(" (inactive)")
+            }
         );
     }
     Ok(())

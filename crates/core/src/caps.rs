@@ -28,31 +28,117 @@ pub struct ModuleDef {
 }
 
 pub const MODULES: &[ModuleDef] = &[
-    ModuleDef { key: "user:read",    desc: "Read your profile",                    classic: &["user", "user:email", "user:follow", "repo", "read:user"] },
-    ModuleDef { key: "user:write",   desc: "Update profile (bio, company, …)",     classic: &["user"] },
-    ModuleDef { key: "repo:read",    desc: "Read repositories",                    classic: &["repo", "public_repo", "read:user"] },
-    ModuleDef { key: "repo:write",   desc: "Write code / contents",                classic: &["repo", "public_repo"] },
-    ModuleDef { key: "repo:admin",   desc: "Administer repository settings",       classic: &["repo"] },
-    ModuleDef { key: "issues:write", desc: "Create & close issues",                classic: &["repo", "public_repo"] },
-    ModuleDef { key: "prs:read",     desc: "Read pull requests",                   classic: &["repo", "public_repo"] },
-    ModuleDef { key: "prs:write",    desc: "Create & merge pull requests",         classic: &["repo", "public_repo"] },
-    ModuleDef { key: "workflow:read", desc: "Read Actions workflows & runs",       classic: &["repo", "workflow"] },
-    ModuleDef { key: "workflow:write", desc: "Trigger / cancel / re-run workflows", classic: &["workflow", "repo"] },
-    ModuleDef { key: "releases:write", desc: "Create releases & upload assets",     classic: &["repo"] },
-    ModuleDef { key: "org:read",     desc: "Read organizations you belong to",     classic: &["read:org", "write:org", "admin:org", "repo"] },
-    ModuleDef { key: "org:write",    desc: "Write to organizations (members …)",   classic: &["write:org", "admin:org"] },
-    ModuleDef { key: "org:admin",    desc: "Administer organizations",             classic: &["admin:org"] },
-    ModuleDef { key: "gist",         desc: "Create gists",                         classic: &["gist"] },
-    ModuleDef { key: "notifications", desc: "Read notifications",                  classic: &["notifications", "repo"] },
-    ModuleDef { key: "packages",     desc: "Read packages",                        classic: &["read:packages", "write:packages"] },
-    ModuleDef { key: "delete_repo",  desc: "Delete repositories",                  classic: &["delete_repo"] },
+    ModuleDef {
+        key: "user:read",
+        desc: "Read your profile",
+        classic: &["user", "user:email", "user:follow", "repo", "read:user"],
+    },
+    ModuleDef {
+        key: "user:write",
+        desc: "Update profile (bio, company, …)",
+        classic: &["user"],
+    },
+    ModuleDef {
+        key: "repo:read",
+        desc: "Read repositories",
+        classic: &["repo", "public_repo", "read:user"],
+    },
+    ModuleDef {
+        key: "repo:write",
+        desc: "Write code / contents",
+        classic: &["repo", "public_repo"],
+    },
+    ModuleDef {
+        key: "repo:admin",
+        desc: "Administer repository settings",
+        classic: &["repo"],
+    },
+    ModuleDef {
+        key: "issues:write",
+        desc: "Create & close issues",
+        classic: &["repo", "public_repo"],
+    },
+    ModuleDef {
+        key: "prs:read",
+        desc: "Read pull requests",
+        classic: &["repo", "public_repo"],
+    },
+    ModuleDef {
+        key: "prs:write",
+        desc: "Create & merge pull requests",
+        classic: &["repo", "public_repo"],
+    },
+    ModuleDef {
+        key: "workflow:read",
+        desc: "Read Actions workflows & runs",
+        classic: &["repo", "workflow"],
+    },
+    ModuleDef {
+        key: "workflow:write",
+        desc: "Trigger / cancel / re-run workflows",
+        classic: &["workflow", "repo"],
+    },
+    ModuleDef {
+        key: "releases:write",
+        desc: "Create releases & upload assets",
+        classic: &["repo"],
+    },
+    ModuleDef {
+        key: "org:read",
+        desc: "Read organizations you belong to",
+        classic: &["read:org", "write:org", "admin:org", "repo"],
+    },
+    ModuleDef {
+        key: "org:write",
+        desc: "Write to organizations (members …)",
+        classic: &["write:org", "admin:org"],
+    },
+    ModuleDef {
+        key: "org:admin",
+        desc: "Administer organizations",
+        classic: &["admin:org"],
+    },
+    ModuleDef {
+        key: "gist",
+        desc: "Create gists",
+        classic: &["gist"],
+    },
+    ModuleDef {
+        key: "notifications",
+        desc: "Read notifications",
+        classic: &["notifications", "repo"],
+    },
+    ModuleDef {
+        key: "packages",
+        desc: "Read packages",
+        classic: &["read:packages", "write:packages"],
+    },
+    ModuleDef {
+        key: "delete_repo",
+        desc: "Delete repositories",
+        classic: &["delete_repo"],
+    },
 ];
 
 pub const MODULE_KEYS: &[&str] = &[
-    "user:read", "user:write", "repo:read", "repo:write", "repo:admin",
-    "issues:write", "prs:read", "prs:write", "workflow:read", "workflow:write",
-    "releases:write", "org:read", "org:write", "org:admin", "gist",
-    "/notifications", "packages", "delete_repo",
+    "user:read",
+    "user:write",
+    "repo:read",
+    "repo:write",
+    "repo:admin",
+    "issues:write",
+    "prs:read",
+    "prs:write",
+    "workflow:read",
+    "workflow:write",
+    "releases:write",
+    "org:read",
+    "org:write",
+    "org:admin",
+    "gist",
+    "/notifications",
+    "packages",
+    "delete_repo",
 ];
 
 pub fn module_def(key: &str) -> Option<&'static ModuleDef> {
@@ -129,7 +215,7 @@ enum Probe {
 fn classify(result: &Result<serde_json::Value, octocrab::Error>) -> Probe {
     match result {
         Ok(_) => Probe::Granted,
-        Err(e) => match err_status(&e) {
+        Err(e) => match err_status(e) {
             Some(422) | Some(400) => Probe::GrantedValidation,
             Some(403) => Probe::Denied,
             Some(401) => Probe::Denied,
@@ -155,7 +241,11 @@ fn state_of(p: Probe, source: &str, evidence: &str) -> ModuleState {
         key: source.to_string(),
         enabled,
         state: state.to_string(),
-        source: if enabled { source.to_string() } else { format!("probe:{source}") },
+        source: if enabled {
+            source.to_string()
+        } else {
+            format!("probe:{source}")
+        },
         evidence,
     }
 }
@@ -230,9 +320,19 @@ pub async fn check(octo: &Arc<Octocrab>, db: &SuiteDb) -> Result<CapReport> {
                 key: def.key.to_string(),
                 enabled: hit,
                 state: if hit { "granted" } else { "denied" }.to_string(),
-                source: if hit { "scope".into() } else { "scope-missing".into() },
+                source: if hit {
+                    "scope".into()
+                } else {
+                    "scope-missing".into()
+                },
                 evidence: if hit {
-                    format!("scope {}", def.classic.iter().find(|s| scopes.iter().any(|g| g.eq_ignore_ascii_case(s))).unwrap_or(&""))
+                    format!(
+                        "scope {}",
+                        def.classic
+                            .iter()
+                            .find(|s| scopes.iter().any(|g| g.eq_ignore_ascii_case(s)))
+                            .unwrap_or(&"")
+                    )
                 } else {
                     format!("requires one of: {}", def.classic.join(", "))
                 },
@@ -245,9 +345,11 @@ pub async fn check(octo: &Arc<Octocrab>, db: &SuiteDb) -> Result<CapReport> {
                 .iter()
                 .any(|g| s.eq_ignore_ascii_case(g))
         });
-        let org_write = scopes
-            .iter()
-            .any(|s| ["write:org", "admin:org"].iter().any(|g| s.eq_ignore_ascii_case(g)));
+        let org_write = scopes.iter().any(|s| {
+            ["write:org", "admin:org"]
+                .iter()
+                .any(|g| s.eq_ignore_ascii_case(g))
+        });
         let org_admin = scopes
             .iter()
             .any(|s| ["admin:org"].iter().any(|g| s.eq_ignore_ascii_case(g)));
@@ -306,7 +408,14 @@ pub async fn check(octo: &Arc<Octocrab>, db: &SuiteDb) -> Result<CapReport> {
         // the admin probe is a true no-op)
         let mut target: Option<(String, String, String)> = None;
         if let Ok(repos) = octo
-            .get::<Vec<_RepoStub>, _, _>("/user/repos", Some(&[("per_page", "5"), ("sort", "pushed"), ("affiliation", "owner")]))
+            .get::<Vec<_RepoStub>, _, _>(
+                "/user/repos",
+                Some(&[
+                    ("per_page", "5"),
+                    ("sort", "pushed"),
+                    ("affiliation", "owner"),
+                ]),
+            )
             .await
         {
             if let Some(r) = repos.first() {
@@ -333,45 +442,60 @@ pub async fn check(octo: &Arc<Octocrab>, db: &SuiteDb) -> Result<CapReport> {
 
         if let Some((owner, repo, current_description)) = &target {
             // repo:read — repo metadata + contents
-            let p = classify(&octo.get::<serde_json::Value, _, _>(
-                    &format!("/repos/{owner}/{repo}/contents/"),
-                    None::<&[(&str, &str)]>,
-                ).await,
+            let p = classify(
+                &octo
+                    .get::<serde_json::Value, _, _>(
+                        &format!("/repos/{owner}/{repo}/contents/"),
+                        None::<&[(&str, &str)]>,
+                    )
+                    .await,
             );
             set_probe_state(&mut mods, "repo:read", &p, "contents listing");
 
             // repo:write — PUT contents with empty message → 422 if allowed
             let body = serde_json::json!({"message": "", "content": ""});
-            let p = classify(&octo.put::<serde_json::Value, _, _>(
-                    &format!("/repos/{owner}/{repo}/contents/__octocrab_caps_probe__"),
-                    Some(&body),
-                ).await,
+            let p = classify(
+                &octo
+                    .put::<serde_json::Value, _, _>(
+                        &format!("/repos/{owner}/{repo}/contents/__octocrab_caps_probe__"),
+                        Some(&body),
+                    )
+                    .await,
             );
             set_probe_state(&mut mods, "repo:write", &p, "contents PUT validation");
 
             // issues:write — POST issue with empty title → 422 if allowed
             let body = serde_json::json!({"title": ""});
-            let p = classify(&octo.post::<_, serde_json::Value>(
-                    &format!("/repos/{owner}/{repo}/issues"),
-                    Some(&body),
-                ).await,
+            let p = classify(
+                &octo
+                    .post::<_, serde_json::Value>(
+                        &format!("/repos/{owner}/{repo}/issues"),
+                        Some(&body),
+                    )
+                    .await,
             );
             set_probe_state(&mut mods, "issues:write", &p, "issue POST validation");
 
             // prs:write — POST pull with empty fields → 422 if allowed
             let body = serde_json::json!({"title": "", "head": "", "base": ""});
-            let p = classify(&octo.post::<_, serde_json::Value>(
-                    &format!("/repos/{owner}/{repo}/pulls"),
-                    Some(&body),
-                ).await,
+            let p = classify(
+                &octo
+                    .post::<_, serde_json::Value>(
+                        &format!("/repos/{owner}/{repo}/pulls"),
+                        Some(&body),
+                    )
+                    .await,
             );
             set_probe_state(&mut mods, "prs:write", &p, "pull POST validation");
 
             // prs:read — GET pulls
-            let p = classify(&octo.get::<serde_json::Value, _, _>(
-                    &format!("/repos/{owner}/{repo}/pulls"),
-                    Some(&[("per_page", "1")]),
-                ).await,
+            let p = classify(
+                &octo
+                    .get::<serde_json::Value, _, _>(
+                        &format!("/repos/{owner}/{repo}/pulls"),
+                        Some(&[("per_page", "1")]),
+                    )
+                    .await,
             );
             set_probe_state(&mut mods, "prs:read", &p, "pulls listing");
 
@@ -394,14 +518,21 @@ pub async fn check(octo: &Arc<Octocrab>, db: &SuiteDb) -> Result<CapReport> {
                     .and_then(|w| w.get("id").and_then(|i| i.as_u64()));
                 if let Some(id) = first_id {
                     let body = serde_json::json!({"ref": "___octocrab_probe_invalid_ref___"});
-                    let p = classify(&octo.post::<_, serde_json::Value>(
-                            &format!("/repos/{owner}/{repo}/actions/workflows/{id}/dispatches"),
-                            Some(&body),
-                        ).await,
+                    let p = classify(
+                        &octo
+                            .post::<_, serde_json::Value>(
+                                &format!("/repos/{owner}/{repo}/actions/workflows/{id}/dispatches"),
+                                Some(&body),
+                            )
+                            .await,
                     );
                     set_probe_state(&mut mods, "workflow:write", &p, "dispatch validation");
                 } else {
-                    note(&mut mods, "workflow:write", "no workflows in target repo to probe");
+                    note(
+                        &mut mods,
+                        "workflow:write",
+                        "no workflows in target repo to probe",
+                    );
                 }
             } else {
                 note(&mut mods, "workflow:write", "workflows unreadable");
@@ -409,31 +540,50 @@ pub async fn check(octo: &Arc<Octocrab>, db: &SuiteDb) -> Result<CapReport> {
 
             // releases:write — POST release with empty tag → 422 if allowed
             let body = serde_json::json!({"tag_name": ""});
-            let p = classify(&octo.post::<_, serde_json::Value>(
-                    &format!("/repos/{owner}/{repo}/releases"),
-                    Some(&body),
-                ).await,
+            let p = classify(
+                &octo
+                    .post::<_, serde_json::Value>(
+                        &format!("/repos/{owner}/{repo}/releases"),
+                        Some(&body),
+                    )
+                    .await,
             );
             set_probe_state(&mut mods, "releases:write", &p, "release POST validation");
 
             // repo:admin — PATCH with the *current* description (true no-op)
-            let p = classify(&octo.patch::<serde_json::Value, _, _>(
-                    &format!("/repos/{owner}/{repo}"),
-                    Some(&serde_json::json!({"description": current_description})),
-                ).await,
+            let p = classify(
+                &octo
+                    .patch::<serde_json::Value, _, _>(
+                        &format!("/repos/{owner}/{repo}"),
+                        Some(&serde_json::json!({"description": current_description})),
+                    )
+                    .await,
             );
             set_probe_state(&mut mods, "repo:admin", &p, "repo PATCH no-op");
         } else {
-            for key in ["repo:read", "repo:write", "issues:write", "prs:read", "prs:write", "workflow:read", "workflow:write", "releases:write", "repo:admin"] {
+            for key in [
+                "repo:read",
+                "repo:write",
+                "issues:write",
+                "prs:read",
+                "prs:write",
+                "workflow:read",
+                "workflow:write",
+                "releases:write",
+                "repo:admin",
+            ] {
                 note(&mut mods, key, "no owned repo found to probe against");
             }
         }
 
         // user:write — PATCH /user with current name (no-op)
         if let Some(name) = author.name.clone() {
-            let p = classify(&
-                octo
-                    .patch::<serde_json::Value, _, _>("/user", Some(&serde_json::json!({"name": name})))
+            let p = classify(
+                &octo
+                    .patch::<serde_json::Value, _, _>(
+                        "/user",
+                        Some(&serde_json::json!({"name": name})),
+                    )
                     .await,
             );
             set_probe_state(&mut mods, "user:write", &p, "user PATCH no-op");
@@ -442,41 +592,57 @@ pub async fn check(octo: &Arc<Octocrab>, db: &SuiteDb) -> Result<CapReport> {
         }
 
         // gist
-        let p = classify(&octo.post::<_, serde_json::Value>(
-                "/gists",
-                Some(&serde_json::json!({"files": {}})),
-            ).await,
+        let p = classify(
+            &octo
+                .post::<_, serde_json::Value>("/gists", Some(&serde_json::json!({"files": {}})))
+                .await,
         );
         set_probe_state(&mut mods, "gist", &p, "gist POST validation");
 
         // notifications
-        let p = classify(&octo.get::<serde_json::Value, _, _>("/notifications", Some(&[("per_page", "1")])).await,
+        let p = classify(
+            &octo
+                .get::<serde_json::Value, _, _>("/notifications", Some(&[("per_page", "1")]))
+                .await,
         );
         set_probe_state(&mut mods, "notifications", &p, "notifications GET");
 
         // packages
-        let p = classify(&octo.get::<serde_json::Value, _, _>("/user/packages", Some(&[("per_page", "1")])).await,
+        let p = classify(
+            &octo
+                .get::<serde_json::Value, _, _>("/user/packages", Some(&[("per_page", "1")]))
+                .await,
         );
         set_probe_state(&mut mods, "packages", &p, "packages GET");
 
         // delete_repo — unsafe to probe; leave unknown
-        note(&mut mods, "delete_repo", "probe unsafe — left unknown for fine-grained tokens");
+        note(
+            &mut mods,
+            "delete_repo",
+            "probe unsafe — left unknown for fine-grained tokens",
+        );
 
         // orgs -------------------------------------------------------------
         let mut org_rows: Vec<OrgAccess> = vec![];
         for org in &org_logins {
-            let read_p = classify(&octo.get::<serde_json::Value, _, _>(
-                    &format!("/orgs/{org}/members"),
-                    Some(&[("per_page", "1")]),
-                ).await,
+            let read_p = classify(
+                &octo
+                    .get::<serde_json::Value, _, _>(
+                        &format!("/orgs/{org}/members"),
+                        Some(&[("per_page", "1")]),
+                    )
+                    .await,
             );
-            let write_p = classify(&octo.post::<_, serde_json::Value>(
-                    &format!("/orgs/{org}/invitations"),
-                    Some(&serde_json::json!({})),
-                ).await,
+            let write_p = classify(
+                &octo
+                    .post::<_, serde_json::Value>(
+                        &format!("/orgs/{org}/invitations"),
+                        Some(&serde_json::json!({})),
+                    )
+                    .await,
             );
-            let admin_p = classify(&
-                octo
+            let admin_p = classify(
+                &octo
                     .patch::<serde_json::Value, _, _>(
                         &format!("/orgs/{org}"),
                         Some(&serde_json::json!({"default_repository_permission": "read"})),
@@ -503,9 +669,27 @@ pub async fn check(octo: &Arc<Octocrab>, db: &SuiteDb) -> Result<CapReport> {
         let any_org_read = org_rows.iter().any(|o| o.read);
         let any_org_write = org_rows.iter().any(|o| o.write);
         let any_org_admin = org_rows.iter().any(|o| o.admin);
-        set_probe(&mut mods, "org:read", any_org_read, "probe", "org members listing");
-        set_probe(&mut mods, "org:write", any_org_write, "probe", "org invitations validation");
-        set_probe(&mut mods, "org:admin", any_org_admin, "probe", "org PATCH no-op");
+        set_probe(
+            &mut mods,
+            "org:read",
+            any_org_read,
+            "probe",
+            "org members listing",
+        );
+        set_probe(
+            &mut mods,
+            "org:write",
+            any_org_write,
+            "probe",
+            "org invitations validation",
+        );
+        set_probe(
+            &mut mods,
+            "org:admin",
+            any_org_admin,
+            "probe",
+            "org PATCH no-op",
+        );
         if org_logins.is_empty() {
             note(&mut mods, "org:read", "user has no org memberships");
             note(&mut mods, "org:write", "user has no org memberships");
@@ -524,7 +708,10 @@ pub async fn check(octo: &Arc<Octocrab>, db: &SuiteDb) -> Result<CapReport> {
                         write: o.write,
                         admin: o.admin,
                     },
-                    (o.login.clone(), serde_json::to_string(o).unwrap_or_default()),
+                    (
+                        o.login.clone(),
+                        serde_json::to_string(o).unwrap_or_default(),
+                    ),
                 )
             })
             .unzip();
@@ -539,7 +726,13 @@ pub async fn check(octo: &Arc<Octocrab>, db: &SuiteDb) -> Result<CapReport> {
     let orgs_for_report: Vec<OrgAccess> = db
         .orgs()
         .into_iter()
-        .map(|(login, role, read, write, admin)| OrgAccess { login, role, read, write, admin })
+        .map(|(login, role, read, write, admin)| OrgAccess {
+            login,
+            role,
+            read,
+            write,
+            admin,
+        })
         .collect();
 
     let report = CapReport {
@@ -558,7 +751,7 @@ pub async fn check(octo: &Arc<Octocrab>, db: &SuiteDb) -> Result<CapReport> {
 
 // helpers ------------------------------------------------------------------
 
-fn set_probe(mods: &mut Vec<ModuleState>, key: &str, enabled: bool, source: &str, evidence: &str) {
+fn set_probe(mods: &mut [ModuleState], key: &str, enabled: bool, source: &str, evidence: &str) {
     if let Some(m) = mods.iter_mut().find(|m| m.key == key) {
         m.enabled = enabled;
         m.state = if enabled { "granted" } else { "denied" }.to_string();
@@ -567,7 +760,7 @@ fn set_probe(mods: &mut Vec<ModuleState>, key: &str, enabled: bool, source: &str
     }
 }
 
-fn set_probe_state(mods: &mut Vec<ModuleState>, key: &str, probe: &Probe, what: &str) {
+fn set_probe_state(mods: &mut [ModuleState], key: &str, probe: &Probe, what: &str) {
     if let Some(m) = mods.iter_mut().find(|m| m.key == key) {
         match probe {
             Probe::Granted | Probe::GrantedValidation => {
@@ -592,7 +785,7 @@ fn set_probe_state(mods: &mut Vec<ModuleState>, key: &str, probe: &Probe, what: 
     }
 }
 
-fn note(mods: &mut Vec<ModuleState>, key: &str, msg: &str) {
+fn note(mods: &mut [ModuleState], key: &str, msg: &str) {
     if let Some(m) = mods.iter_mut().find(|m| m.key == key) {
         if m.state != "granted" {
             m.evidence = msg.to_string();
@@ -608,5 +801,3 @@ pub async fn can(octo: &Arc<Octocrab>, db: &SuiteDb, key: &str) -> Result<bool> 
     let report = check(octo, db).await?;
     Ok(report.enabled(key))
 }
-
-

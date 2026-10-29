@@ -8,7 +8,7 @@ use crate::cmd::auth::open_client;
 use crate::cmd::repos::split_repo;
 use crate::util::*;
 use anyhow::Result;
-use octocrab_core::templates::{template_def, render, TemplateParams, TEMPLATES};
+use octocrab_core::templates::{render, template_def, TemplateParams, TEMPLATES};
 
 pub async fn list(json: bool) -> Result<()> {
     if json {
@@ -42,7 +42,10 @@ pub async fn list(json: bool) -> Result<()> {
         );
     }
     println!();
-    println!("{}", dim("install: octocrab-cli templates install <key> OWNER/REPO --bins cli,gui"));
+    println!(
+        "{}",
+        dim("install: octocrab-cli templates install <key> OWNER/REPO --bins cli,gui")
+    );
     Ok(())
 }
 
@@ -69,7 +72,12 @@ async fn params_for(full_name: &str, args: &InstallArgs) -> Result<TemplateParam
         bins: args
             .bins
             .as_ref()
-            .map(|b| b.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+            .map(|b| {
+                b.split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            })
             .unwrap_or_default(),
         branches: vec![repo_json
             .default_branch
@@ -78,7 +86,12 @@ async fn params_for(full_name: &str, args: &InstallArgs) -> Result<TemplateParam
         exclude: args
             .exclude
             .as_ref()
-            .map(|b| b.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+            .map(|b| {
+                b.split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            })
             .unwrap_or_default(),
         license: args
             .license
@@ -95,6 +108,7 @@ async fn params_for(full_name: &str, args: &InstallArgs) -> Result<TemplateParam
     })
 }
 
+#[derive(Default)]
 pub struct InstallArgs {
     pub project: Option<String>,
     pub desc: Option<String>,
@@ -107,33 +121,22 @@ pub struct InstallArgs {
     pub message: Option<String>,
 }
 
-impl Default for InstallArgs {
-    fn default() -> Self {
-        Self {
-            project: None,
-            desc: None,
-            tagline: None,
-            bins: None,
-            exclude: None,
-            license: None,
-            contact: None,
-            branch: None,
-            message: None,
-        }
-    }
-}
-
 pub async fn install(key: String, full_name: String, args: InstallArgs, json: bool) -> Result<()> {
     let def = template_def(&key)
         .ok_or_else(|| anyhow::anyhow!("unknown template '{key}' — see `templates list`"))?;
     let (db, octo) = open_client()?;
     if !db.module_enabled(def.gate) {
-        anyhow::bail!("installing '{key}' needs module '{}' — not granted this session", def.gate);
+        anyhow::bail!(
+            "installing '{key}' needs module '{}' — not granted this session",
+            def.gate
+        );
     }
     let (owner, repo) = split_repo(&full_name)?;
     let params = params_for(&full_name, &args).await?;
     let files = render(&key, &params)?;
-    let message = args.message.unwrap_or_else(|| format!("ci: install {key} template via octocrab-cli"));
+    let message = args
+        .message
+        .unwrap_or_else(|| format!("ci: install {key} template via octocrab-cli"));
     let branch = args.branch.as_deref();
 
     let mut written = Vec::new();

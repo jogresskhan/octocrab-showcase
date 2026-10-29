@@ -5,7 +5,7 @@ pub mod misc;
 pub mod modules;
 pub mod orgs;
 pub mod pages_cmd;
-pub mod repos;
 pub mod releases;
+pub mod repos;
 pub mod templates;
 pub mod workflows;

@@ -62,8 +62,8 @@ impl SuiteDb {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("creating {}", parent.display()))?;
         }
-        let conn = Connection::open(path)
-            .with_context(|| format!("opening db at {}", path.display()))?;
+        let conn =
+            Connection::open(path).with_context(|| format!("opening db at {}", path.display()))?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         #[cfg(unix)]
@@ -158,11 +158,9 @@ impl SuiteDb {
 
     pub fn get_meta(&self, key: &str) -> Option<String> {
         self.conn
-            .query_row(
-                "SELECT value FROM meta WHERE key = ?1",
-                params![key],
-                |r| r.get::<_, String>(0),
-            )
+            .query_row("SELECT value FROM meta WHERE key = ?1", params![key], |r| {
+                r.get::<_, String>(0)
+            })
             .optional()
             .ok()
             .flatten()
@@ -291,9 +289,10 @@ impl SuiteDb {
     }
 
     pub fn modules(&self) -> Vec<ModuleState> {
-        let mut stmt = match self.conn.prepare(
-            "SELECT key, enabled, state, source, evidence FROM modules ORDER BY key",
-        ) {
+        let mut stmt = match self
+            .conn
+            .prepare("SELECT key, enabled, state, source, evidence FROM modules ORDER BY key")
+        {
             Ok(s) => s,
             Err(_) => return vec![],
         };

@@ -19,16 +19,16 @@ pub async fn list(json: bool) -> Result<()> {
             if let Some(arr) = v.as_array() {
                 if arr.is_empty() {
                     println!("{}", warn("you are not a member of any organization"));
-                    println!("{}", dim("→ create one: octocrab-cli achievements org <login>"));
+                    println!(
+                        "{}",
+                        dim("→ create one: octocrab-cli achievements org <login>")
+                    );
                 }
                 let t = Table::new(&[24, 56]);
                 t.row(&["ORG", "ACCESS (from capability map)"]);
                 for o in arr {
                     let login = o.get("login").and_then(|v| v.as_str()).unwrap_or("?");
-                    let known = db
-                        .orgs()
-                        .into_iter()
-                        .find(|(l, _, _, _, _)| l == login);
+                    let known = db.orgs().into_iter().find(|(l, _, _, _, _)| l == login);
                     let access = match known {
                         Some((_, role, read, write, admin)) => format!(
                             "role={} read:{} write:{} admin:{}",
@@ -57,8 +57,17 @@ pub async fn get(org: String, json: bool) -> Result<()> {
         println!("{}", serde_json::to_string_pretty(&data)?);
         return Ok(());
     }
-    println!("{} — {}", bold(&data.login), data.description.clone().unwrap_or_default());
-    println!("created: {}", data.created_at.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_else(|| "—".into()));
+    println!(
+        "{} — {}",
+        bold(&data.login),
+        data.description.clone().unwrap_or_default()
+    );
+    println!(
+        "created: {}",
+        data.created_at
+            .map(|d| d.format("%Y-%m-%d").to_string())
+            .unwrap_or_else(|| "—".into())
+    );
     if let Some(blog) = &data.blog {
         println!("blog: {blog}");
     }
@@ -84,7 +93,10 @@ pub async fn members(org: String, limit: usize, json: bool) -> Result<()> {
         t.row(&["MEMBER", "AVATAR"]);
         for m in arr {
             let login = m.get("login").and_then(|v| v.as_str()).unwrap_or("?");
-            t.row(&[bold(login), dim(m.get("html_url").and_then(|v| v.as_str()).unwrap_or(""))]);
+            t.row(&[
+                bold(login),
+                dim(m.get("html_url").and_then(|v| v.as_str()).unwrap_or("")),
+            ]);
         }
     }
     Ok(())
@@ -107,7 +119,11 @@ pub async fn repos(org: String, limit: usize, json: bool) -> Result<()> {
     for r in &page.items {
         t.row(&[
             trunc(r.full_name.as_deref().unwrap_or(""), 39),
-            if r.private.unwrap_or(false) { warn("private") } else { ok("public") },
+            if r.private.unwrap_or(false) {
+                warn("private")
+            } else {
+                ok("public")
+            },
             trunc(&r.description.clone().unwrap_or_default(), 49),
         ]);
     }

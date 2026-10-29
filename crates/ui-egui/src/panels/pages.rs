@@ -50,10 +50,7 @@ pub fn show(
     // ---------------------------------------------------- action buttons
     let idle = busy.is_none() && has_client;
     ui.horizontal(|ui| {
-        if ui
-            .add_enabled(idle, egui::Button::new("Status"))
-            .clicked()
-        {
+        if ui.add_enabled(idle, egui::Button::new("Status")).clicked() {
             on_status();
         }
         let enable_label = if can_admin {
@@ -100,7 +97,11 @@ pub fn show(
         }
         if let Some(b) = busy {
             ui.spinner();
-            ui.label(RichText::new(format!("{b}…")).color(theme::YELLOW).size(11.0));
+            ui.label(
+                RichText::new(format!("{b}…"))
+                    .color(theme::YELLOW)
+                    .size(11.0),
+            );
         }
     });
     if !has_client {
@@ -124,17 +125,17 @@ pub fn show(
         Some(st) if !st.enabled => {
             egui::Frame::none()
                 .fill(theme::YELLOW.gamma_multiply(0.12))
-                .stroke(egui::Stroke::new(1.0_f32, theme::YELLOW.gamma_multiply(0.45)))
+                .stroke(egui::Stroke::new(
+                    1.0_f32,
+                    theme::YELLOW.gamma_multiply(0.45),
+                ))
                 .inner_margin(egui::Margin::same(8.0))
                 .rounding(4.0)
                 .show(ui, |ui| {
                     ui.label(
-                        RichText::new(format!(
-                            "🌐 Pages is NOT enabled for {}",
-                            form.repo.trim()
-                        ))
-                        .color(theme::YELLOW)
-                        .size(12.0),
+                        RichText::new(format!("🌐 Pages is NOT enabled for {}", form.repo.trim()))
+                            .color(theme::YELLOW)
+                            .size(12.0),
                     );
                     if let Some(e) = &st.error {
                         ui.label(RichText::new(e.clone()).color(theme::DIM).size(10.5));

@@ -10,8 +10,7 @@ use std::sync::Arc;
 
 /// Pages configuration (404 → not enabled).
 pub async fn info(octo: &Arc<Octocrab>, owner: &str, repo: &str) -> Result<serde_json::Value> {
-    let (status, body) =
-        raw::raw_get(octo, &format!("/repos/{owner}/{repo}/pages")).await?;
+    let (status, body) = raw::raw_get(octo, &format!("/repos/{owner}/{repo}/pages")).await?;
     if status == 404 {
         bail!("GitHub Pages is not enabled for {owner}/{repo}");
     }
@@ -55,7 +54,11 @@ pub async fn request_build(octo: &Arc<Octocrab>, owner: &str, repo: &str) -> Res
 }
 
 /// Latest Pages build status.
-pub async fn latest_build(octo: &Arc<Octocrab>, owner: &str, repo: &str) -> Result<serde_json::Value> {
+pub async fn latest_build(
+    octo: &Arc<Octocrab>,
+    owner: &str,
+    repo: &str,
+) -> Result<serde_json::Value> {
     let (status, body) =
         raw::raw_get(octo, &format!("/repos/{owner}/{repo}/pages/builds/latest")).await?;
     if status >= 400 {

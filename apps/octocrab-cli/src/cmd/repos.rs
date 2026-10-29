@@ -34,7 +34,10 @@ pub async fn list(limit: usize, json: bool) -> Result<()> {
         for r in arr {
             let name = r.get("full_name").and_then(|v| v.as_str()).unwrap_or("?");
             let private = r.get("private").and_then(|v| v.as_bool()).unwrap_or(false);
-            let stars = r.get("stargazers_count").and_then(|v| v.as_i64()).unwrap_or(0);
+            let stars = r
+                .get("stargazers_count")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
             let desc = r.get("description").and_then(|v| v.as_str()).unwrap_or("");
             let pushed = r
                 .get("pushed_at")
@@ -44,7 +47,11 @@ pub async fn list(limit: usize, json: bool) -> Result<()> {
                 .unwrap_or("");
             t.row(&[
                 trunc(name, 33),
-                if private { warn("private") } else { ok("public") },
+                if private {
+                    warn("private")
+                } else {
+                    ok("public")
+                },
                 stars.to_string(),
                 pushed.to_string(),
                 trunc(desc, 39),
@@ -62,7 +69,15 @@ pub async fn get(full_name: String, json: bool) -> Result<()> {
         println!("{}", serde_json::to_string_pretty(&repo)?);
         return Ok(());
     }
-    println!("{}  {}", bold(repo.full_name.as_deref().unwrap_or("")), if repo.private.unwrap_or(false) { warn("[private]") } else { ok("[public]") });
+    println!(
+        "{}  {}",
+        bold(repo.full_name.as_deref().unwrap_or("")),
+        if repo.private.unwrap_or(false) {
+            warn("[private]")
+        } else {
+            ok("[public]")
+        }
+    );
     if let Some(d) = &repo.description {
         println!("description: {d}");
     }
@@ -75,7 +90,10 @@ pub async fn get(full_name: String, json: bool) -> Result<()> {
         repo.forks_count.unwrap_or(0),
         repo.open_issues_count.unwrap_or(0)
     );
-    println!("url: {}", repo.html_url.map(|u| u.to_string()).unwrap_or_default());
+    println!(
+        "url: {}",
+        repo.html_url.map(|u| u.to_string()).unwrap_or_default()
+    );
     Ok(())
 }
 
@@ -97,7 +115,11 @@ pub async fn create(name: String, desc: Option<String>, public: bool, json: bool
     println!(
         "{} {}",
         ok("repository created:"),
-        bold(repo.get("full_name").and_then(|v| v.as_str()).unwrap_or("?"))
+        bold(
+            repo.get("full_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?")
+        )
     );
     Ok(())
 }
@@ -199,7 +221,11 @@ pub async fn edit(
         println!(
             "{} settings saved — desc: {} • homepage: {}",
             ok("✓"),
-            bold(body.get("description").and_then(|v| v.as_str()).unwrap_or("—")),
+            bold(
+                body.get("description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("—")
+            ),
             bold(body.get("homepage").and_then(|v| v.as_str()).unwrap_or("—"))
         );
     }
@@ -218,11 +244,26 @@ pub async fn edit(
         )
         .await?;
         if status >= 400 {
-            anyhow::bail!("topics update failed: HTTP {status} — {}",
-                body.get("message").and_then(|v| v.as_str()).unwrap_or(""));
+            anyhow::bail!(
+                "topics update failed: HTTP {status} — {}",
+                body.get("message").and_then(|v| v.as_str()).unwrap_or("")
+            );
         }
         last_body = serde_json::json!({ "names": names });
-        println!("{} topics set: {}", ok("✓"), cyan(&last_body["names"].as_array().map(|a| a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join(", ")).unwrap_or_default()));
+        println!(
+            "{} topics set: {}",
+            ok("✓"),
+            cyan(
+                &last_body["names"]
+                    .as_array()
+                    .map(|a| a
+                        .iter()
+                        .filter_map(|v| v.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", "))
+                    .unwrap_or_default()
+            )
+        );
     }
     if json {
         println!("{}", serde_json::to_string_pretty(&last_body)?);
@@ -235,13 +276,13 @@ pub async fn edit(
 pub async fn community(full_name: String, json: bool) -> Result<()> {
     let (_db, octo) = open_client()?;
     let (owner, repo) = split_repo(&full_name)?;
-    let (status, body) = octocrab_core::raw::raw_get(
-        &octo,
-        &format!("/repos/{owner}/{repo}/community/profile"),
-    )
-    .await?;
+    let (status, body) =
+        octocrab_core::raw::raw_get(&octo, &format!("/repos/{owner}/{repo}/community/profile"))
+            .await?;
     if status == 404 {
-        anyhow::bail!("community profile unavailable for {owner}/{repo} (private repo without repo scope?)");
+        anyhow::bail!(
+            "community profile unavailable for {owner}/{repo} (private repo without repo scope?)"
+        );
     }
     if status >= 400 {
         anyhow::bail!("community profile failed: HTTP {status}");
@@ -250,7 +291,10 @@ pub async fn community(full_name: String, json: bool) -> Result<()> {
         println!("{}", serde_json::to_string_pretty(&body)?);
         return Ok(());
     }
-    let files = body.get("files").cloned().unwrap_or(serde_json::Value::Null);
+    let files = body
+        .get("files")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
     println!("{} — community health", bold(&full_name));
     let health = body
         .get("health_percentage")
@@ -281,7 +325,11 @@ pub async fn community(full_name: String, json: bool) -> Result<()> {
         "pull_request_template",
     ] {
         let (present, url) = row(key);
-        let state = if present { ok("present") } else { err("missing") };
+        let state = if present {
+            ok("present")
+        } else {
+            err("missing")
+        };
         let hint = if present {
             url
         } else {
@@ -323,8 +371,8 @@ pub async fn upload(
 ) -> Result<()> {
     let (_db, octo) = open_client()?;
     let (owner, repo) = split_repo(&full_name)?;
-    let content = std::fs::read_to_string(&file)
-        .map_err(|e| anyhow::anyhow!("cannot read {file}: {e}"))?;
+    let content =
+        std::fs::read_to_string(&file).map_err(|e| anyhow::anyhow!("cannot read {file}: {e}"))?;
     let rh = octo.repos(&owner, &repo);
 
     // existing file → update_file with its blob sha; new file → create_file

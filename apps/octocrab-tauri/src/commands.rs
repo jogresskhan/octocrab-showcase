@@ -179,7 +179,11 @@ pub async fn default_target() -> Cmd {
         let repos: Vec<Value> = octo
             .get(
                 "/user/repos",
-                Some(&[("per_page", "5"), ("sort", "pushed"), ("affiliation", "owner")]),
+                Some(&[
+                    ("per_page", "5"),
+                    ("sort", "pushed"),
+                    ("affiliation", "owner"),
+                ]),
             )
             .await
             .unwrap_or_default();
@@ -641,7 +645,12 @@ pub async fn org_details(org: String) -> Cmd {
             })
         })
         .collect();
-    let members_fetched = match octo.orgs(org.as_str()).list_members().per_page(100u8).send().await
+    let members_fetched = match octo
+        .orgs(org.as_str())
+        .list_members()
+        .per_page(100u8)
+        .send()
+        .await
     {
         Ok(p) => p.items.len(),
         Err(_) => 0,
@@ -678,7 +687,11 @@ fn csv_list(v: Option<&str>) -> Vec<String> {
 /// argument). Anything else is rejected.
 fn split_repo(spec: &str) -> Result<(String, String), Value> {
     let spec = spec.trim();
-    let parts: Vec<&str> = spec.split('/').map(str::trim).filter(|p| !p.is_empty()).collect();
+    let parts: Vec<&str> = spec
+        .split('/')
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .collect();
     if parts.len() != 2 {
         return Err(fail(format!("target must be owner/repo — got '{spec}'")));
     }
@@ -724,7 +737,12 @@ struct TemplateJob {
 async fn run_template(db: SuiteDb, job: TemplateJob) -> Cmd {
     let def = match templates::template_def(&job.key) {
         Some(d) => d,
-        None => return Err(fail(format!("unknown template '{}' — see the Templates tab", job.key))),
+        None => {
+            return Err(fail(format!(
+                "unknown template '{}' — see the Templates tab",
+                job.key
+            )))
+        }
     };
     if !db.module_enabled(def.gate) {
         return Ok(json!({
@@ -748,7 +766,11 @@ async fn run_template(db: SuiteDb, job: TemplateJob) -> Cmd {
     let description = s(&repo_json, "description");
     let default_branch = {
         let b = s(&repo_json, "default_branch");
-        if b.is_empty() { "main".to_string() } else { b }
+        if b.is_empty() {
+            "main".to_string()
+        } else {
+            b
+        }
     };
     let license = repo_json
         .get("license")
@@ -935,7 +957,10 @@ pub async fn pages_enable(repo: String) -> Cmd {
     }
     let (octo, _token) = client_from_db(&db)?;
     let v = pages::enable(&octo, &owner, &name).await.map_err(fail)?;
-    db.log_event("pages", &format!("enabled Pages (workflow) on {owner}/{name}"));
+    db.log_event(
+        "pages",
+        &format!("enabled Pages (workflow) on {owner}/{name}"),
+    );
     Ok(json!({
         "ok": true,
         "owner": owner,
@@ -955,9 +980,16 @@ pub async fn pages_build(repo: String) -> Cmd {
     let (owner, name) = split_repo(&repo)?;
     let db = open_db()?;
     let (octo, _token) = client_from_db(&db)?;
-    pages::request_build(&octo, &owner, &name).await.map_err(fail)?;
-    let build = pages::latest_build(&octo, &owner, &name).await.map_err(fail)?;
-    db.log_event("pages", &format!("requested Pages build for {owner}/{name}"));
+    pages::request_build(&octo, &owner, &name)
+        .await
+        .map_err(fail)?;
+    let build = pages::latest_build(&octo, &owner, &name)
+        .await
+        .map_err(fail)?;
+    db.log_event(
+        "pages",
+        &format!("requested Pages build for {owner}/{name}"),
+    );
     Ok(json!({
         "ok": true,
         "owner": owner,
@@ -994,7 +1026,11 @@ pub async fn repo_get(repo: String) -> Cmd {
         raw::raw_get(&octo, &format!("/repos/{owner}/{name}/community/profile"))
             .await
             .unwrap_or((404, Value::Null));
-    let community = if cstatus >= 400 { Value::Null } else { community };
+    let community = if cstatus >= 400 {
+        Value::Null
+    } else {
+        community
+    };
     Ok(json!({
         "owner": owner,
         "repo": name,
@@ -1061,7 +1097,9 @@ pub async fn repo_edit(
         if status >= 400 {
             return Err(fail(format!(
                 "PATCH /repos/{owner}/{name} failed: HTTP {status} — {}",
-                body.get("message").and_then(Value::as_str).unwrap_or("no message")
+                body.get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("no message")
             )));
         }
     }
@@ -1078,7 +1116,9 @@ pub async fn repo_edit(
         if status >= 400 {
             return Err(fail(format!(
                 "PUT /repos/{owner}/{name}/topics failed: HTTP {status} — {}",
-                body.get("message").and_then(Value::as_str).unwrap_or("no message")
+                body.get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("no message")
             )));
         }
     }

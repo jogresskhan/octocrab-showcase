@@ -31,13 +31,13 @@ pub async fn put_file(
         .and_then(|c| c.items.first().map(|i| i.sha.clone()));
 
     let url = if let Some(sha) = existing_sha {
-        let mut builder = rh.update_file(path, message, content.to_string(), &sha);
+        let mut builder = rh.update_file(path, message, content, &sha);
         if let Some(b) = branch {
             builder = builder.branch(b);
         }
         builder.send().await?.content.html_url
     } else {
-        let mut builder = rh.create_file(path, message, content.to_string());
+        let mut builder = rh.create_file(path, message, content);
         if let Some(b) = branch {
             builder = builder.branch(b);
         }

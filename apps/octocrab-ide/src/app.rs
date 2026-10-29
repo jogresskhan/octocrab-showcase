@@ -11,8 +11,8 @@ use octocrab::Octocrab;
 use octocrab_core::cache::{self, TTL_LONG, TTL_MEDIUM, TTL_SHORT};
 use octocrab_core::db::{ModuleState, SuiteDb};
 use octocrab_ui_egui::panels::{
-    editor_tabs, explorer, modules, releases, search, tags, workflows,
-    pages as pages_panel, repo as repo_panel, templates as templates_panel,
+    editor_tabs, explorer, modules, pages as pages_panel, releases, repo as repo_panel, search,
+    tags, templates as templates_panel, workflows,
 };
 use octocrab_ui_egui::{
     highlight, theme, widgets, CommunityHealth, FileProgress, JobRow, Lang, OpenTab, PagesStatus,
@@ -56,17 +56,27 @@ fn push_files_sync(
         let mut rows = progress_lock(&progress);
         *rows = files
             .iter()
-            .map(|(p, _)| FileProgress { path: p.clone(), ..Default::default() })
+            .map(|(p, _)| FileProgress {
+                path: p.clone(),
+                ..Default::default()
+            })
             .collect();
     }
     let mut out = Vec::new();
     for (i, (path, content)) in files.into_iter().enumerate() {
-        let res = net::block_on(net::put_file(&octo, &owner, &repo, &path, &content, &message, None));
+        let res = net::block_on(net::put_file(
+            &octo, &owner, &repo, &path, &content, &message, None,
+        ));
         let (ok, detail) = match res {
             Ok(url) => (true, url),
             Err(e) => (false, format!("{e}")),
         };
-        out.push(FileProgress { path: path.clone(), done: true, ok, detail: detail.clone() });
+        out.push(FileProgress {
+            path: path.clone(),
+            done: true,
+            ok,
+            detail: detail.clone(),
+        });
         if let Some(row) = progress_lock(&progress).get_mut(i) {
             row.done = true;
             row.ok = ok;
@@ -103,7 +113,6 @@ fn take_owned<T: Clone + Send>(slot: &mut Option<Promise<T>>) -> Option<T> {
     slot.take();
     Some(value)
 }
-
 
 // -------------------------------------------------------------- models
 
@@ -162,6 +171,15 @@ struct TreePayload {
 
 // ---------------------------------------------------------------- app
 
+/// File fetch result: (path, content) or an error string.
+type FileFetch = Result<(String, String), String>;
+/// Jobs fetch result: (run id, job rows) or an error string.
+type JobsFetch = Result<(u64, Vec<JobRow>), String>;
+/// Right-panel load result: repo overview + optional community health.
+type PanelResult = Result<(RepoOverview, Option<CommunityHealth>), String>;
+/// Scaffold outcome: per-file progress entries.
+type ScaffoldResult = Result<Vec<FileProgress>, String>;
+
 pub struct IdeApp {
     db: Arc<Mutex<SuiteDb>>,
     db_path: String,
@@ -203,7 +221,7 @@ pub struct IdeApp {
     active_tab: Option<usize>,
     file_cache: HashMap<String, String>,
     file_inflight: HashSet<String>,
-    file_ps: HashMap<String, Promise<Result<(String, String), String>>>,
+    file_ps: HashMap<String, Promise<FileFetch>>,
     hl_cache: Option<(String, u64, Vec<Vec<Span>>)>,
     file_err: Option<String>,
 
@@ -217,7 +235,7 @@ pub struct IdeApp {
     jobs_label: String,
     jobs_loading: bool,
     jobs_err: Option<String>,
-    jobs_p: Option<Promise<Result<(u64, Vec<JobRow>), String>>>,
+    jobs_p: Option<Promise<JobsFetch>>,
     dispatch_p: Option<Promise<Result<String, String>>>,
 
     // releases / tags
@@ -269,10 +287,10 @@ pub struct IdeApp {
     repo_loading: bool,
     repo_busy: Option<&'static str>,
     repo_err: Option<String>,
-    rpanel_p: Option<Promise<Result<(RepoOverview, Option<CommunityHealth>), String>>>,
+    rpanel_p: Option<Promise<PanelResult>>,
     repo_save_p: Option<Promise<Result<String, String>>>,
     repo_scaffold_progress: Arc<Mutex<Vec<FileProgress>>>,
-    repo_scaffold_p: Option<Promise<Result<Vec<FileProgress>, String>>>,
+    repo_scaffold_p: Option<Promise<ScaffoldResult>>,
 
     // palette
     palette_open: bool,
@@ -318,10 +336,7 @@ impl IdeApp {
             repo_p: None,
             repo: None,
             mods,
-            orgs: orgs
-                .into_iter()
-                .map(|(login, role, read, write, admin)| (login, role, read, write, admin))
-                .collect(),
+            orgs: orgs.into_iter().collect(),
             granted,
             activity: Activity::Explorer,
             sidebar_open: true,
@@ -495,7 +510,10 @@ impl IdeApp {
                                 let db = db_lock(&db);
                                 cache::set_json(&db, &key, &items, TTL_LONG);
                             }
-                            Ok(TreePayload { items, truncated: trunc })
+                            Ok(TreePayload {
+                                items,
+                                truncated: trunc,
+                            })
                         }
                         Err(e) => Err(format!("{e}")),
                     }
@@ -579,16 +597,18 @@ impl IdeApp {
                 }
                 self.file_ps.insert(
                     path.clone(),
-                    spawn(move || match net::block_on(net::fetch_file(&octo, &o, &r, &b, &p)) {
-                        Ok(content) => {
-                            {
-                                let db = db_lock(&db);
-                                cache::set_json(&db, &key, &content, TTL_LONG);
+                    spawn(
+                        move || match net::block_on(net::fetch_file(&octo, &o, &r, &b, &p)) {
+                            Ok(content) => {
+                                {
+                                    let db = db_lock(&db);
+                                    cache::set_json(&db, &key, &content, TTL_LONG);
+                                }
+                                Ok((p, content))
                             }
-                            Ok((p, content))
-                        }
-                        Err(e) => Err(format!("{e}")),
-                    }),
+                            Err(e) => Err(format!("{e}")),
+                        },
+                    ),
                 );
             }
         }
@@ -631,7 +651,9 @@ impl IdeApp {
         if self.runs_p.is_some() || !self.module_enabled("workflow:read") {
             return;
         }
-        let Some(repo) = self.repo.clone() else { return };
+        let Some(repo) = self.repo.clone() else {
+            return;
+        };
         let (o, r) = (repo.owner.clone(), repo.name.clone());
         let key = format!("runs:{o}/{r}:{RUNS_LIMIT}");
         if !force {
@@ -673,7 +695,9 @@ impl IdeApp {
         }
         self.jobs_run = Some(run_id);
         self.center = Center::RunJobs(run_id);
-        let Some(repo) = self.repo.clone() else { return };
+        let Some(repo) = self.repo.clone() else {
+            return;
+        };
         let (o, r) = (repo.owner.clone(), repo.name.clone());
         let key = format!("jobs:{o}/{r}:{run_id}");
         if !force {
@@ -712,7 +736,9 @@ impl IdeApp {
         if self.releases_p.is_some() || !self.module_enabled("repo:read") {
             return;
         }
-        let Some(repo) = self.repo.clone() else { return };
+        let Some(repo) = self.repo.clone() else {
+            return;
+        };
         let (o, r) = (repo.owner.clone(), repo.name.clone());
         let key = format!("releases:{o}/{r}:30");
         if !force {
@@ -725,7 +751,9 @@ impl IdeApp {
                 self.cache_hits += 1;
             }
         }
-        let Some(octo) = self.octo.clone() else { return };
+        let Some(octo) = self.octo.clone() else {
+            return;
+        };
         self.releases_loading = true;
         self.releases_err = None;
         let db = self.db.clone();
@@ -747,7 +775,9 @@ impl IdeApp {
         if self.tags_p.is_some() || !self.module_enabled("repo:read") {
             return;
         }
-        let Some(repo) = self.repo.clone() else { return };
+        let Some(repo) = self.repo.clone() else {
+            return;
+        };
         let (o, r) = (repo.owner.clone(), repo.name.clone());
         let key = format!("tags:{o}/{r}:50");
         if !force {
@@ -760,7 +790,9 @@ impl IdeApp {
                 self.cache_hits += 1;
             }
         }
-        let Some(octo) = self.octo.clone() else { return };
+        let Some(octo) = self.octo.clone() else {
+            return;
+        };
         self.tags_loading = true;
         self.tags_err = None;
         let db = self.db.clone();
@@ -782,7 +814,9 @@ impl IdeApp {
         if self.pulls_p.is_some() || !self.module_enabled("prs:read") {
             return;
         }
-        let Some(repo) = self.repo.clone() else { return };
+        let Some(repo) = self.repo.clone() else {
+            return;
+        };
         let (o, r) = (repo.owner.clone(), repo.name.clone());
         let key = format!("pulls:{o}/{r}:30");
         if !force {
@@ -796,7 +830,9 @@ impl IdeApp {
                 self.cache_hits += 1;
             }
         }
-        let Some(octo) = self.octo.clone() else { return };
+        let Some(octo) = self.octo.clone() else {
+            return;
+        };
         self.pulls_loading = true;
         self.pulls_err = None;
         let db = self.db.clone();
@@ -847,7 +883,9 @@ impl IdeApp {
     /// Prefill panel target fields from the resolved repository (kept
     /// non-destructive: only fills empty fields).
     fn prefill_panel_forms(&mut self) {
-        let Some(repo) = self.repo.clone() else { return };
+        let Some(repo) = self.repo.clone() else {
+            return;
+        };
         let full = format!("{}/{}", repo.owner, repo.name);
         if self.tpl_form.repo.trim().is_empty() {
             self.tpl_form.repo = full.clone();
@@ -881,8 +919,10 @@ impl IdeApp {
         self.tpl_err = None;
         let def = templates_panel::selected_def(&self.tpl_form);
         if !self.module_enabled(def.gate) {
-            self.tpl_err =
-                Some(format!("module `{}` is not granted — cannot install `{}`", def.gate, def.key));
+            self.tpl_err = Some(format!(
+                "module `{}` is not granted — cannot install `{}`",
+                def.gate, def.key
+            ));
             return;
         }
         let Some(octo) = self.octo.clone() else {
@@ -1043,8 +1083,8 @@ impl IdeApp {
         self.repo_loading = true;
         self.status = format!("loading {o}/{r}…");
         self.rpanel_p = Some(spawn(move || {
-            let overview = net::block_on(net::repo_overview(&octo, &o, &r))
-                .map_err(|e| format!("{e}"))?;
+            let overview =
+                net::block_on(net::repo_overview(&octo, &o, &r)).map_err(|e| format!("{e}"))?;
             // community profile is best-effort (404 → None)
             let community = net::block_on(net::community_profile(&octo, &o, &r)).ok();
             Ok((overview, community))
@@ -1078,8 +1118,15 @@ impl IdeApp {
         self.repo_busy = Some("saving settings");
         self.status = format!("saving {o}/{r} settings…");
         self.repo_save_p = Some(spawn(move || {
-            net::block_on(net::save_repo_settings(&octo, &o, &r, &description, &homepage, &topics))
-                .map_err(|e| format!("{e}"))
+            net::block_on(net::save_repo_settings(
+                &octo,
+                &o,
+                &r,
+                &description,
+                &homepage,
+                &topics,
+            ))
+            .map_err(|e| format!("{e}"))
         }));
     }
 
@@ -1141,8 +1188,12 @@ impl IdeApp {
             self.status = "workflow:write not granted".into();
             return;
         }
-        let Some(repo) = self.repo.clone() else { return };
-        let Some(octo) = self.octo.clone() else { return };
+        let Some(repo) = self.repo.clone() else {
+            return;
+        };
+        let Some(octo) = self.octo.clone() else {
+            return;
+        };
         if self.dispatch_p.is_some() {
             return;
         }
@@ -1150,7 +1201,8 @@ impl IdeApp {
         let git_ref = self.branch.clone();
         self.status = "dispatching workflow…".into();
         self.dispatch_p = Some(spawn(move || {
-            let wfs = net::block_on(net::list_workflows(&octo, &o, &r)).map_err(|e| format!("{e}"))?;
+            let wfs =
+                net::block_on(net::list_workflows(&octo, &o, &r)).map_err(|e| format!("{e}"))?;
             let (path, name) = wfs
                 .first()
                 .cloned()
@@ -1200,7 +1252,7 @@ impl IdeApp {
     fn poll_promises(&mut self) {
         // identity
         if let Some(res) = take_owned(&mut self.identity_p) {
-                match res {
+            match res {
                 Ok(login) => {
                     self.login = Some(login.clone());
                     self.net_err = None;
@@ -1211,7 +1263,7 @@ impl IdeApp {
         }
         // default repo
         if let Some(res) = take_owned(&mut self.repo_p) {
-                match res {
+            match res {
                 Ok(info) => {
                     let changed = self
                         .repo
@@ -1242,7 +1294,7 @@ impl IdeApp {
         }
         // tree
         if let Some(res) = take_owned(&mut self.tree_p) {
-                match res {
+            match res {
                 Ok(payload) => {
                     self.tree_loading = false;
                     self.tree_err = None;
@@ -1288,7 +1340,7 @@ impl IdeApp {
         }
         // runs
         if let Some(res) = take_owned(&mut self.runs_p) {
-                match res {
+            match res {
                 Ok(rows) => {
                     self.runs_loading = false;
                     self.runs_err = None;
@@ -1302,7 +1354,7 @@ impl IdeApp {
         }
         // jobs
         if let Some(res) = take_owned(&mut self.jobs_p) {
-                match res {
+            match res {
                 Ok((run_id, rows)) => {
                     self.jobs_loading = false;
                     self.jobs_err = None;
@@ -1318,7 +1370,7 @@ impl IdeApp {
         }
         // releases
         if let Some(res) = take_owned(&mut self.releases_p) {
-                match res {
+            match res {
                 Ok(rows) => {
                     self.releases_loading = false;
                     self.releases_err = None;
@@ -1332,7 +1384,7 @@ impl IdeApp {
         }
         // tags
         if let Some(res) = take_owned(&mut self.tags_p) {
-                match res {
+            match res {
                 Ok(rows) => {
                     self.tags_loading = false;
                     self.tags_err = None;
@@ -1346,7 +1398,7 @@ impl IdeApp {
         }
         // pulls
         if let Some(res) = take_owned(&mut self.pulls_p) {
-                match res {
+            match res {
                 Ok(rows) => {
                     self.pulls_loading = false;
                     self.pulls_err = None;
@@ -1360,7 +1412,7 @@ impl IdeApp {
         }
         // code search
         if let Some(res) = take_owned(&mut self.code_p) {
-                match res {
+            match res {
                 Ok(hits) => {
                     self.gh_busy = false;
                     self.gh_err = None;
@@ -1374,7 +1426,7 @@ impl IdeApp {
         }
         // dispatch
         if let Some(res) = take_owned(&mut self.dispatch_p) {
-                match res {
+            match res {
                 Ok(msg) => {
                     self.status = msg;
                     self.runs_p = None;
@@ -1389,7 +1441,10 @@ impl IdeApp {
             match res {
                 Ok(rows) => {
                     let okc = rows.iter().filter(|r| r.ok).count();
-                    self.status = format!("template install finished: {okc}/{} file(s) pushed", rows.len());
+                    self.status = format!(
+                        "template install finished: {okc}/{} file(s) pushed",
+                        rows.len()
+                    );
                 }
                 Err(e) => self.tpl_err = Some(e),
             }
@@ -1416,7 +1471,10 @@ impl IdeApp {
             match res {
                 Ok(rows) => {
                     let okc = rows.iter().filter(|r| r.ok).count();
-                    self.status = format!("site generation finished: {okc}/{} file(s) pushed", rows.len());
+                    self.status = format!(
+                        "site generation finished: {okc}/{} file(s) pushed",
+                        rows.len()
+                    );
                 }
                 Err(e) => self.pages_err = Some(e),
             }
@@ -1458,7 +1516,10 @@ impl IdeApp {
             match res {
                 Ok(rows) => {
                     let okc = rows.iter().filter(|r| r.ok).count();
-                    self.status = format!("community scaffold finished: {okc}/{} file(s) pushed", rows.len());
+                    self.status = format!(
+                        "community scaffold finished: {okc}/{} file(s) pushed",
+                        rows.len()
+                    );
                 }
                 Err(e) => self.repo_err = Some(format!("scaffold failed: {e}")),
             }
@@ -1620,11 +1681,7 @@ impl IdeApp {
                             .size(11.0),
                     );
                     ui.separator();
-                    ui.label(
-                        RichText::new(repo_label)
-                            .color(Color32::WHITE)
-                            .size(11.0),
-                    );
+                    ui.label(RichText::new(repo_label).color(Color32::WHITE).size(11.0));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(
                             RichText::new(format!("{granted}/{total} modules"))
@@ -1637,11 +1694,7 @@ impl IdeApp {
                                 .size(10.0),
                         );
                         if !status.is_empty() {
-                            ui.label(
-                                RichText::new(status)
-                                    .color(Color32::WHITE)
-                                    .size(11.0),
-                            );
+                            ui.label(RichText::new(status).color(Color32::WHITE).size(11.0));
                         }
                     });
                 });
@@ -1671,11 +1724,11 @@ impl IdeApp {
                     ];
                     for (icon, tip, act) in items {
                         let sel = self.activity == act;
-                        let btn = egui::Button::new(
-                            RichText::new(icon)
-                                .size(16.0)
-                                .color(if sel { Color32::WHITE } else { theme::DIM }),
-                        )
+                        let btn = egui::Button::new(RichText::new(icon).size(16.0).color(if sel {
+                            Color32::WHITE
+                        } else {
+                            theme::DIM
+                        }))
                         .fill(if sel {
                             theme::ACCENT.gamma_multiply(0.4)
                         } else {
@@ -1684,11 +1737,9 @@ impl IdeApp {
                         .min_size(egui::vec2(34.0, 32.0));
                         let mut resp = ui.add(btn);
                         resp = resp.on_hover_text(tip);
-                        if resp.clicked() {
-                            if self.activity != act {
-                                self.activity = act;
-                                self.on_activity_changed();
-                            }
+                        if resp.clicked() && self.activity != act {
+                            self.activity = act;
+                            self.on_activity_changed();
                         }
                     }
                 });
@@ -1812,7 +1863,11 @@ impl IdeApp {
             self.local_hits = ranked
                 .into_iter()
                 .take(50)
-                .map(|(_, path)| SearchHit { path, detail: String::new(), gh: false })
+                .map(|(_, path)| SearchHit {
+                    path,
+                    detail: String::new(),
+                    gh: false,
+                })
                 .collect();
         }
         let mut hits: Vec<SearchHit> = self.local_hits.clone();
@@ -2060,17 +2115,15 @@ impl IdeApp {
 
     fn sidebar_account(&mut self, ui: &mut Ui) {
         widgets::section_header(ui, "Account");
-        ui.horizontal(|ui| {
-            match &self.login {
-                Some(l) => {
-                    widgets::badge(ui, l, theme::GREEN);
-                    if let Some(k) = &self.token_kind {
-                        widgets::badge(ui, k, theme::YELLOW);
-                    }
+        ui.horizontal(|ui| match &self.login {
+            Some(l) => {
+                widgets::badge(ui, l, theme::GREEN);
+                if let Some(k) = &self.token_kind {
+                    widgets::badge(ui, k, theme::YELLOW);
                 }
-                None => {
-                    ui.label(RichText::new("not signed in").color(theme::DIM));
-                }
+            }
+            None => {
+                ui.label(RichText::new("not signed in").color(theme::DIM));
             }
         });
         if let Some(label) = &self.token_label {
@@ -2088,7 +2141,11 @@ impl IdeApp {
         ui.label(
             RichText::new(format!("{}/{} granted", self.granted, self.mods.len()))
                 .size(12.0)
-                .color(if self.granted > 0 { theme::GREEN } else { theme::DIM }),
+                .color(if self.granted > 0 {
+                    theme::GREEN
+                } else {
+                    theme::DIM
+                }),
         );
         if ui.button("open module grid").clicked() {
             self.center = Center::Modules;
@@ -2182,12 +2239,14 @@ impl IdeApp {
         ui.horizontal(|ui| {
             editor_tabs::breadcrumbs(
                 ui,
-                self.repo.as_ref().map(|r| r.owner.as_str()).filter(|_| {
-                    self.source == Source::Github
-                }),
-                self.repo.as_ref().map(|r| r.name.as_str()).filter(|_| {
-                    self.source == Source::Github
-                }),
+                self.repo
+                    .as_ref()
+                    .map(|r| r.owner.as_str())
+                    .filter(|_| self.source == Source::Github),
+                self.repo
+                    .as_ref()
+                    .map(|r| r.name.as_str())
+                    .filter(|_| self.source == Source::Github),
                 &tab.path,
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -2221,16 +2280,10 @@ impl IdeApp {
                 if tab.loading {
                     ui.horizontal(|ui| {
                         ui.spinner();
-                        ui.label(
-                            RichText::new(format!("loading {}…", tab.path))
-                                .color(theme::DIM),
-                        );
+                        ui.label(RichText::new(format!("loading {}…", tab.path)).color(theme::DIM));
                     });
                 } else {
-                    ui.label(
-                        RichText::new("content not loaded yet")
-                            .color(theme::DIM),
-                    );
+                    ui.label(RichText::new("content not loaded yet").color(theme::DIM));
                     if ui.button("load file").clicked() {
                         self.open_file(tab.path.clone());
                     }
@@ -2261,23 +2314,91 @@ impl IdeApp {
                 .collect();
         }
         let commands: Vec<(Command, String, String)> = vec![
-            (Command::ToggleSidebar, "Toggle Sidebar (Ctrl+B)".into(), "show or hide the side panel".into()),
-            (Command::Goto(Activity::Explorer), "View: Explorer".into(), "switch the sidebar to the file tree".into()),
-            (Command::Goto(Activity::Search), "View: Search".into(), "switch the sidebar to search".into()),
-            (Command::Goto(Activity::Pulls), "View: Source Control / PRs".into(), "open pull request list".into()),
-            (Command::Goto(Activity::Workflows), "View: Workflows".into(), "switch the sidebar to workflow runs".into()),
-            (Command::Goto(Activity::Releases), "View: Releases & Tags".into(), "switch the sidebar to releases".into()),
-            (Command::Goto(Activity::Templates), "View: Templates".into(), "install CI / release / pages / site / community templates".into()),
-            (Command::Goto(Activity::Pages), "View: GitHub Pages".into(), "status, enable, build, generate landing site".into()),
-            (Command::Goto(Activity::Repo), "View: Repository & Community".into(), "repo settings + community health + scaffold".into()),
-            (Command::Goto(Activity::Account), "View: Account & Modules".into(), "show identity + module grid".into()),
-            (Command::ReloadTree, "Reload File Tree".into(), "re-fetch the tree (stale-while-revalidate)".into()),
-            (Command::ClearCache, "Clear Cache & Reload".into(), "invalidate all SQLite TTL caches and refetch".into()),
-            (Command::RefreshRuns, "Refresh Workflow Runs".into(), "re-fetch Actions runs".into()),
-            (Command::DispatchWorkflow, "Workflow: Dispatch First Workflow".into(), "requires workflow:write".into()),
-            (Command::OpenModules, "Open Module Grid".into(), "capability matrix in the editor area".into()),
-            (Command::SwitchLocal, "Explorer: Local Workspace Mode".into(), "browse /home/z/octocrab-suite".into()),
-            (Command::SwitchGithub, "Explorer: GitHub Repo Mode".into(), "browse the remote git tree".into()),
+            (
+                Command::ToggleSidebar,
+                "Toggle Sidebar (Ctrl+B)".into(),
+                "show or hide the side panel".into(),
+            ),
+            (
+                Command::Goto(Activity::Explorer),
+                "View: Explorer".into(),
+                "switch the sidebar to the file tree".into(),
+            ),
+            (
+                Command::Goto(Activity::Search),
+                "View: Search".into(),
+                "switch the sidebar to search".into(),
+            ),
+            (
+                Command::Goto(Activity::Pulls),
+                "View: Source Control / PRs".into(),
+                "open pull request list".into(),
+            ),
+            (
+                Command::Goto(Activity::Workflows),
+                "View: Workflows".into(),
+                "switch the sidebar to workflow runs".into(),
+            ),
+            (
+                Command::Goto(Activity::Releases),
+                "View: Releases & Tags".into(),
+                "switch the sidebar to releases".into(),
+            ),
+            (
+                Command::Goto(Activity::Templates),
+                "View: Templates".into(),
+                "install CI / release / pages / site / community templates".into(),
+            ),
+            (
+                Command::Goto(Activity::Pages),
+                "View: GitHub Pages".into(),
+                "status, enable, build, generate landing site".into(),
+            ),
+            (
+                Command::Goto(Activity::Repo),
+                "View: Repository & Community".into(),
+                "repo settings + community health + scaffold".into(),
+            ),
+            (
+                Command::Goto(Activity::Account),
+                "View: Account & Modules".into(),
+                "show identity + module grid".into(),
+            ),
+            (
+                Command::ReloadTree,
+                "Reload File Tree".into(),
+                "re-fetch the tree (stale-while-revalidate)".into(),
+            ),
+            (
+                Command::ClearCache,
+                "Clear Cache & Reload".into(),
+                "invalidate all SQLite TTL caches and refetch".into(),
+            ),
+            (
+                Command::RefreshRuns,
+                "Refresh Workflow Runs".into(),
+                "re-fetch Actions runs".into(),
+            ),
+            (
+                Command::DispatchWorkflow,
+                "Workflow: Dispatch First Workflow".into(),
+                "requires workflow:write".into(),
+            ),
+            (
+                Command::OpenModules,
+                "Open Module Grid".into(),
+                "capability matrix in the editor area".into(),
+            ),
+            (
+                Command::SwitchLocal,
+                "Explorer: Local Workspace Mode".into(),
+                "browse /home/z/octocrab-suite".into(),
+            ),
+            (
+                Command::SwitchGithub,
+                "Explorer: GitHub Repo Mode".into(),
+                "browse the remote git tree".into(),
+            ),
             (Command::Quit, "Quit".into(), "close the IDE".into()),
         ];
         if self.palette_q.is_empty() {
@@ -2287,7 +2408,7 @@ impl IdeApp {
             .into_iter()
             .filter_map(|c| fuzzy::score(&self.palette_q, &c.1).map(|s| (s, c)))
             .collect();
-        v.sort_by(|a, b| b.0.cmp(&a.0));
+        v.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
         v.into_iter().map(|(_, c)| c).collect()
     }
 
@@ -2350,10 +2471,13 @@ impl IdeApp {
         let quick_paths: Vec<String> = if cmds_mode {
             vec![]
         } else {
-            items.iter().map(|(c, label, _)| {
-                let _ = c;
-                label.clone()
-            }).collect()
+            items
+                .iter()
+                .map(|(c, label, _)| {
+                    let _ = c;
+                    label.clone()
+                })
+                .collect()
         };
 
         let mut open = true;
@@ -2378,18 +2502,16 @@ impl IdeApp {
                 .rounding(6.0),
         )
         .show(ctx, |ui| {
-            let resp = ui
-                .add(
-                    egui::TextEdit::singleline(&mut self.palette_q)
-                        .hint_text(if cmds_mode {
-                            "type a command…"
-                        } else {
-                            "type a file path…"
-                        })
-                        .desired_width(540.0),
-                )
-                .request_focus();
-            let _ = resp;
+            ui.add(
+                egui::TextEdit::singleline(&mut self.palette_q)
+                    .hint_text(if cmds_mode {
+                        "type a command…"
+                    } else {
+                        "type a file path…"
+                    })
+                    .desired_width(540.0),
+            )
+            .request_focus();
             ui.separator();
             egui::ScrollArea::vertical()
                 .max_height(340.0)
@@ -2397,7 +2519,8 @@ impl IdeApp {
                 .show(ui, |ui| {
                     if cmds_mode {
                         for (i, (_cmd, label, detail)) in items.iter().enumerate() {
-                            let r = ui.selectable_label(i == 0, RichText::new(label.clone()).size(12.5));
+                            let r = ui
+                                .selectable_label(i == 0, RichText::new(label.clone()).size(12.5));
                             if r.clicked() {
                                 picked = Some(i);
                             }
@@ -2407,7 +2530,8 @@ impl IdeApp {
                         }
                     } else {
                         for (i, path) in quick_paths.iter().enumerate() {
-                            let r = ui.selectable_label(i == 0, RichText::new(path.clone()).size(12.0));
+                            let r =
+                                ui.selectable_label(i == 0, RichText::new(path.clone()).size(12.0));
                             if r.clicked() {
                                 apply_idx = Some(i);
                             }
@@ -2417,7 +2541,11 @@ impl IdeApp {
             ui.label(
                 RichText::new(format!(
                     "{} results · Enter picks the first · Esc closes",
-                    if cmds_mode { items.len() } else { quick_paths.len() }
+                    if cmds_mode {
+                        items.len()
+                    } else {
+                        quick_paths.len()
+                    }
                 ))
                 .size(10.5)
                 .color(theme::DIM),
@@ -2573,10 +2701,7 @@ impl eframe::App for IdeApp {
             self.frames += 1;
             ctx.request_repaint();
             if self.frames >= 60 {
-                let _ = std::fs::write(
-                    SELFTEST_MARKER,
-                    format!("ok after {} frames", self.frames),
-                );
+                let _ = std::fs::write(SELFTEST_MARKER, format!("ok after {} frames", self.frames));
                 std::process::exit(0);
             }
         } else if self.any_inflight_bool() {

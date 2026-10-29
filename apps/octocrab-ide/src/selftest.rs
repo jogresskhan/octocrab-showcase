@@ -19,9 +19,7 @@ use egui::{Context, Pos2, RawInput};
 use octocrab_ui_egui::panels::{
     pages as pages_panel, repo as repo_panel, templates as templates_panel,
 };
-use octocrab_ui_egui::{
-    theme, widgets, CommunityHealth, FileProgress, PagesStatus, RepoOverview,
-};
+use octocrab_ui_egui::{theme, widgets, CommunityHealth, FileProgress, PagesStatus, RepoOverview};
 
 const SCREEN: (f32, f32) = (360.0, 940.0);
 

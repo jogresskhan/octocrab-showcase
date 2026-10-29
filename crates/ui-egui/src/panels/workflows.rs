@@ -42,7 +42,11 @@ pub fn runs_list(
     if loading && runs.is_empty() {
         ui.horizontal(|ui| {
             ui.spinner();
-            ui.label(RichText::new("loading workflow runs…").color(theme::DIM).size(11.5));
+            ui.label(
+                RichText::new("loading workflow runs…")
+                    .color(theme::DIM)
+                    .size(11.5),
+            );
         });
         return;
     }
@@ -62,18 +66,12 @@ pub fn runs_list(
                     egui::Sense::click(),
                 );
                 if resp.hovered() {
-                    ui.painter().rect_filled(
-                        rect,
-                        2.0,
-                        egui::Color32::WHITE.gamma_multiply(0.05),
-                    );
+                    ui.painter()
+                        .rect_filled(rect, 2.0, egui::Color32::WHITE.gamma_multiply(0.05));
                 }
                 if selected {
-                    ui.painter().rect_filled(
-                        rect,
-                        2.0,
-                        theme::ACCENT.gamma_multiply(0.35),
-                    );
+                    ui.painter()
+                        .rect_filled(rect, 2.0, theme::ACCENT.gamma_multiply(0.35));
                 }
                 ui.painter().text(
                     egui::pos2(rect.left() + 6.0, rect.top() + 9.0),
@@ -87,12 +85,21 @@ pub fn runs_list(
                     egui::Align2::LEFT_CENTER,
                     truncate(&run.name, 26),
                     egui::FontId::monospace(12.0),
-                    if selected { egui::Color32::WHITE } else { theme::TEXT },
+                    if selected {
+                        egui::Color32::WHITE
+                    } else {
+                        theme::TEXT
+                    },
                 );
                 ui.painter().text(
                     egui::pos2(rect.left() + 24.0, rect.top() + 24.0),
                     egui::Align2::LEFT_CENTER,
-                    format!("#{} · {} · {}", run.id, truncate(&run.branch, 14), run.created),
+                    format!(
+                        "#{} · {} · {}",
+                        run.id,
+                        truncate(&run.branch, 14),
+                        run.created
+                    ),
                     egui::FontId::monospace(10.0),
                     theme::DIM,
                 );
@@ -122,43 +129,47 @@ pub fn jobs_view(ui: &mut Ui, run_label: &str, jobs: &[JobRow], loading: bool) {
         ui.label(RichText::new("(no jobs)").color(theme::DIM).size(11.5));
         return;
     }
-    ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        for job in jobs {
-            let (icon, color) = status_icon(&job.status, job.conclusion.as_deref());
-            let header = format!("{icon} {}{}", truncate(&job.name, 42), job.duration);
-            egui::CollapsingHeader::new(
-                RichText::new(header).color(color).size(12.5),
-            )
-            .id_salt(format!("job-{}", job.id))
-            .default_open(true)
-            .show(ui, |ui| {
-                for step in &job.steps {
-                    let (si, sc) = status_icon(&step.status, step.conclusion.as_deref());
-                    ui.horizontal(|ui| {
-                        ui.monospace(RichText::new(si).color(sc));
-                        ui.label(RichText::new(step.name.clone()).size(11.5).color(theme::TEXT));
-                        ui.with_layout(
-                            egui::Layout::right_to_left(egui::Align::Center),
-                            |ui| {
+    ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            for job in jobs {
+                let (icon, color) = status_icon(&job.status, job.conclusion.as_deref());
+                let header = format!("{icon} {}{}", truncate(&job.name, 42), job.duration);
+                egui::CollapsingHeader::new(RichText::new(header).color(color).size(12.5))
+                    .id_salt(format!("job-{}", job.id))
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        for step in &job.steps {
+                            let (si, sc) = status_icon(&step.status, step.conclusion.as_deref());
+                            ui.horizontal(|ui| {
+                                ui.monospace(RichText::new(si).color(sc));
                                 ui.label(
-                                    RichText::new(step.duration.clone())
-                                        .size(10.5)
-                                        .color(theme::DIM),
+                                    RichText::new(step.name.clone())
+                                        .size(11.5)
+                                        .color(theme::TEXT),
                                 );
-                            },
-                        );
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.label(
+                                            RichText::new(step.duration.clone())
+                                                .size(10.5)
+                                                .color(theme::DIM),
+                                        );
+                                    },
+                                );
+                            });
+                        }
+                        if job.steps.is_empty() {
+                            ui.label(
+                                RichText::new("  (no step data)")
+                                    .size(11.0)
+                                    .color(theme::DIM),
+                            );
+                        }
                     });
-                }
-                if job.steps.is_empty() {
-                    ui.label(
-                        RichText::new("  (no step data)")
-                            .size(11.0)
-                            .color(theme::DIM),
-                    );
-                }
-            });
-        }
-    });
+            }
+        });
 }
 
 fn truncate(s: &str, max: usize) -> String {

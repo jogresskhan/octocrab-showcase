@@ -16,7 +16,10 @@ pub async fn show() -> Result<()> {
         .get::<serde_json::Value, _, _>("/user", None::<&[(&str, &str)]>)
         .await?;
     let g = |k: &str| user.get(k).cloned().unwrap_or(serde_json::Value::Null);
-    println!("{} — profile completeness for achievements", bold(g("login").as_str().unwrap_or("?")));
+    println!(
+        "{} — profile completeness for achievements",
+        bold(g("login").as_str().unwrap_or("?"))
+    );
     println!();
     let fields = [
         ("name", "Name set"),
@@ -29,11 +32,7 @@ pub async fn show() -> Result<()> {
     for (key, label) in fields {
         let val = g(key);
         let present = !val.is_null() && val.as_str().map(|s| !s.is_empty()).unwrap_or(false);
-        println!(
-            "  {} {}",
-            if present { ok("✓") } else { err("✗") },
-            label
-        );
+        println!("  {} {}", if present { ok("✓") } else { err("✗") }, label);
     }
     println!();
     println!(
@@ -45,12 +44,19 @@ pub async fn show() -> Result<()> {
     println!();
     let boosts = db.achievements();
     if boosts.is_empty() {
-        println!("{}", dim("no achievement actions run yet — try `achievements boost --yes`"));
+        println!(
+            "{}",
+            dim("no achievement actions run yet — try `achievements boost --yes`")
+        );
     } else {
         let t = Table::new(&[24, 60, 6]);
         t.row(&["ACTION", "DETAIL", "OK"]);
         for (ts, _action, detail, okk) in boosts {
-            t.row(&[fmt_ts(ts).get(0..16).unwrap_or("").to_string(), trunc(&detail, 59), (if okk { "✓" } else { "✗" }).to_string()]);
+            t.row(&[
+                fmt_ts(ts).get(0..16).unwrap_or("").to_string(),
+                trunc(&detail, 59),
+                (if okk { "✓" } else { "✗" }).to_string(),
+            ]);
         }
     }
     Ok(())
@@ -64,16 +70,25 @@ pub async fn boost(yes: bool, org: Option<String>) -> Result<()> {
     let login = db
         .get_meta("auth_login")
         .ok_or_else(|| anyhow::anyhow!("run `octocrab-cli auth check` first"))?;
-    println!("{} boosting account achievements for {}", cyan("★"), bold(&login));
+    println!(
+        "{} boosting account achievements for {}",
+        cyan("★"),
+        bold(&login)
+    );
 
     // 1. profile enrichment -------------------------------------------------
     let user = octo
         .get::<serde_json::Value, _, _>("/user", None::<&[(&str, &str)]>)
         .await?;
     let mut patch = serde_json::Map::new();
-    let empty = |v: &serde_json::Value| v.is_null() || v.as_str().map(|s| s.trim().is_empty()).unwrap_or(true);
+    let empty = |v: &serde_json::Value| {
+        v.is_null() || v.as_str().map(|s| s.trim().is_empty()).unwrap_or(true)
+    };
     if empty(&user["bio"]) {
-        patch.insert("bio".into(), json!("GitHub power user — driving the Octocrab Suite (CLI + Tauri + egui IDE)"));
+        patch.insert(
+            "bio".into(),
+            json!("GitHub power user — driving the Octocrab Suite (CLI + Tauri + egui IDE)"),
+        );
     }
     if empty(&user["location"]) {
         patch.insert("location".into(), json!("The Cloud"));
@@ -88,7 +103,10 @@ pub async fn boost(yes: bool, org: Option<String>) -> Result<()> {
             .await;
         let okv = r.is_ok();
         db.add_achievement("profile", "profile fields enriched", okv)?;
-        println!("  {} profile enrichment", if okv { ok("✓") } else { err("✗") });
+        println!(
+            "  {} profile enrichment",
+            if okv { ok("✓") } else { err("✗") }
+        );
     } else {
         println!("  {} profile already complete", ok("✓"));
     }
@@ -111,12 +129,20 @@ pub async fn boost(yes: bool, org: Option<String>) -> Result<()> {
             .await;
         match r {
             Ok(_) => {
-                db.add_achievement("repo", "created public repo octocrab-showcase (→ Public badge)", true)?;
+                db.add_achievement(
+                    "repo",
+                    "created public repo octocrab-showcase (→ Public badge)",
+                    true,
+                )?;
                 println!("  {} created {}", ok("✓"), bold(&full));
             }
             Err(e) => {
                 db.add_achievement("repo", &format!("repo create failed: {e}"), false)?;
-                println!("  {} repo creation failed: {}", err("✗"), dim(&e.to_string()));
+                println!(
+                    "  {} repo creation failed: {}",
+                    err("✗"),
+                    dim(&e.to_string())
+                );
             }
         }
     } else {
@@ -138,8 +164,16 @@ pub async fn boost(yes: bool, org: Option<String>) -> Result<()> {
             )
             .await
             .is_ok();
-        db.add_achievement("quickdraw", &format!("issue #{} opened & closed (→ Quickdraw)", issue.number), closed)?;
-        println!("  {} issue #{} opened+closed", if closed { ok("✓") } else { err("✗") }, issue.number);
+        db.add_achievement(
+            "quickdraw",
+            &format!("issue #{} opened & closed (→ Quickdraw)", issue.number),
+            closed,
+        )?;
+        println!(
+            "  {} issue #{} opened+closed",
+            if closed { ok("✓") } else { err("✗") },
+            issue.number
+        );
     } else {
         db.add_achievement("quickdraw", "issues:write locked", false)?;
         println!("  {} issue step skipped (issues:write locked)", warn("!"));
@@ -176,15 +210,26 @@ pub async fn boost(yes: bool, org: Option<String>) -> Result<()> {
                     .and_then(|v| v.as_str())
                     .unwrap_or_default()
                     .to_string();
-                let name = repo.get("name").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+                let name = repo
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string();
                 if octo.current().star_repo(&owner, &name).await.is_ok() {
                     starred += 1;
                 }
             }
         }
     }
-    db.add_achievement("stars", &format!("starred {starred} popular rust repos"), starred > 0)?;
-    println!("  {} starred {starred} repositories", if starred > 0 { ok("✓") } else { warn("!") });
+    db.add_achievement(
+        "stars",
+        &format!("starred {starred} popular rust repos"),
+        starred > 0,
+    )?;
+    println!(
+        "  {} starred {starred} repositories",
+        if starred > 0 { ok("✓") } else { warn("!") }
+    );
 
     // 6. gist → engagement ---------------------------------------------------
     let gist_payload = json!({
@@ -216,16 +261,30 @@ pub async fn boost(yes: bool, org: Option<String>) -> Result<()> {
             .await;
         let okv = r.is_ok();
         db.add_achievement("org", &format!("organization '{org}' creation"), okv)?;
-        println!("  {} organization '{org}': {}", if okv { ok("✓") } else { err("✗") }, if okv { "created" } else { "needs billing/admin rights" });
+        println!(
+            "  {} organization '{org}': {}",
+            if okv { ok("✓") } else { err("✗") },
+            if okv {
+                "created"
+            } else {
+                "needs billing/admin rights"
+            }
+        );
     }
 
     println!();
-    println!("{}", ok("boost complete — check https://github.com/{login} for new badges"));
+    println!(
+        "{}",
+        ok("boost complete — check https://github.com/{login} for new badges")
+    );
     Ok(())
 }
 
 /// branch → commit → PR → merge (all through octocrab).
-async fn pr_pipeline(octo: &std::sync::Arc<octocrab::Octocrab>, login: &str) -> Result<Option<String>> {
+async fn pr_pipeline(
+    octo: &std::sync::Arc<octocrab::Octocrab>,
+    login: &str,
+) -> Result<Option<String>> {
     let full = format!("{login}/{SHOWCASE}");
     let repo = octo
         .get::<serde_json::Value, _, _>(&format!("/repos/{full}"), None::<&[(&str, &str)]>)
@@ -248,19 +307,22 @@ async fn pr_pipeline(octo: &std::sync::Arc<octocrab::Octocrab>, login: &str) -> 
         .ok_or_else(|| anyhow::anyhow!("cannot resolve default branch sha"))?
         .to_string();
 
-    let branch = format!("octocrab-suite-{}", chrono::Utc::now().format("%Y%m%d%H%M%S"));
+    let branch = format!(
+        "octocrab-suite-{}",
+        chrono::Utc::now().format("%Y%m%d%H%M%S")
+    );
     let ref_payload = json!({"ref": format!("refs/heads/{branch}"), "sha": sha});
-    octo.post::<_, serde_json::Value>(
-        &format!("/repos/{full}/git/refs"),
-        Some(&ref_payload),
-    )
-    .await?;
+    octo.post::<_, serde_json::Value>(&format!("/repos/{full}/git/refs"), Some(&ref_payload))
+        .await?;
 
     octo.repos(login, SHOWCASE)
         .create_file(
             format!("notes/{branch}.md"),
             format!("add note from {branch}"),
-            format!("# Suite note\n\nGenerated by octocrab-cli at {}.\n", chrono::Utc::now().to_rfc3339()),
+            format!(
+                "# Suite note\n\nGenerated by octocrab-cli at {}.\n",
+                chrono::Utc::now().to_rfc3339()
+            ),
         )
         .branch(&branch)
         .send()
@@ -273,10 +335,7 @@ async fn pr_pipeline(octo: &std::sync::Arc<octocrab::Octocrab>, login: &str) -> 
         "body": "Automated PR from the Octocrab Suite → **Pull Shark** + **YOLO**"
     });
     let pr = octo
-        .post::<_, serde_json::Value>(
-            &format!("/repos/{full}/pulls"),
-            Some(&pr_payload),
-        )
+        .post::<_, serde_json::Value>(&format!("/repos/{full}/pulls"), Some(&pr_payload))
         .await?;
     let number = pr.get("number").and_then(|v| v.as_i64()).unwrap_or(0);
 

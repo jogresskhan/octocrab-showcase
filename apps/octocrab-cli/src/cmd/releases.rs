@@ -26,7 +26,11 @@ pub async fn list(full_name: String, limit: usize, json: bool) -> Result<()> {
             trunc(&r.tag_name, 15),
             trunc(&r.name.clone().unwrap_or_default(), 29),
             if r.draft { warn("yes") } else { "no".into() },
-            if r.prerelease { warn("yes") } else { "no".into() },
+            if r.prerelease {
+                warn("yes")
+            } else {
+                "no".into()
+            },
             r.published_at
                 .map(|d| d.format("%Y-%m-%d").to_string())
                 .unwrap_or_else(|| "—".into()),
@@ -47,7 +51,11 @@ pub async fn latest(full_name: String, json: bool) -> Result<()> {
         "{} {} {}",
         bold(&r.tag_name),
         cyan(r.name.as_deref().unwrap_or("")),
-        if r.prerelease { warn("(pre-release)") } else { String::new() }
+        if r.prerelease {
+            warn("(pre-release)")
+        } else {
+            String::new()
+        }
     );
     if let Some(b) = &r.body {
         println!("{}", dim("──────────"));
@@ -71,7 +79,12 @@ pub async fn get_by_tag(full_name: String, tag: String, json: bool) -> Result<()
         println!("{}", serde_json::to_string_pretty(&r)?);
         return Ok(());
     }
-    println!("{} {} — {}", bold(&r.tag_name), r.name.clone().unwrap_or_default(), r.html_url);
+    println!(
+        "{} {} — {}",
+        bold(&r.tag_name),
+        r.name.clone().unwrap_or_default(),
+        r.html_url
+    );
     Ok(())
 }
 

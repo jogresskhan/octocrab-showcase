@@ -155,8 +155,14 @@ pub fn render(key: &str, p: &TemplateParams) -> Result<Vec<(String, String)>> {
         "ci" => (template_def("ci").unwrap().files, CI.to_string()),
         "release" => (template_def("release").unwrap().files, RELEASE.to_string()),
         "pages" => (template_def("pages").unwrap().files, PAGES.to_string()),
-        "site" => (template_def("site").unwrap().files, format!("{SITE_CSS}\n<<<SPLIT>>>\n{SITE_HTML}")),
-        "community" => (template_def("community").unwrap().files, COMMUNITY.to_string()),
+        "site" => (
+            template_def("site").unwrap().files,
+            format!("{SITE_HTML}\n<<<SPLIT>>>\n{SITE_CSS}"),
+        ),
+        "community" => (
+            template_def("community").unwrap().files,
+            COMMUNITY.to_string(),
+        ),
         "readme" => (template_def("readme").unwrap().files, README.to_string()),
         other => bail!("unknown template '{other}' — see `templates list`"),
     };
@@ -164,7 +170,11 @@ pub fn render(key: &str, p: &TemplateParams) -> Result<Vec<(String, String)>> {
     // multi-file bodies are delimited by lines of `<<<SPLIT>>>`
     let parts: Vec<&str> = body.split("\n<<<SPLIT>>>\n").collect();
     if parts.len() != files.len() {
-        bail!("internal: template '{key}' has {} parts for {} files", parts.len(), files.len());
+        bail!(
+            "internal: template '{key}' has {} parts for {} files",
+            parts.len(),
+            files.len()
+        );
     }
     Ok(files
         .iter()

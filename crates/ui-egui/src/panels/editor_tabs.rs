@@ -43,7 +43,11 @@ pub fn tab_bar(
                     ui.spacing_mut().item_spacing.x = 0.0;
                     for (i, tab) in tabs.iter().enumerate() {
                         let sel = active == Some(i);
-                        let fill = if sel { theme::PANEL } else { Color32::TRANSPARENT };
+                        let fill = if sel {
+                            theme::PANEL
+                        } else {
+                            Color32::TRANSPARENT
+                        };
                         let resp = egui::Frame::none()
                             .fill(fill)
                             .inner_margin(egui::Margin::symmetric(8.0, 5.0))
@@ -52,12 +56,13 @@ pub fn tab_bar(
                                     if tab.loading {
                                         ui.spinner();
                                     }
-                                    let t = ui.selectable_label(
-                                        sel,
-                                        RichText::new(tab.title.clone()).size(12.0).color(
-                                            if sel { Color32::WHITE } else { theme::DIM },
-                                        ),
-                                    );
+                                    let t =
+                                        ui.selectable_label(
+                                            sel,
+                                            RichText::new(tab.title.clone()).size(12.0).color(
+                                                if sel { Color32::WHITE } else { theme::DIM },
+                                            ),
+                                        );
                                     if t.clicked() {
                                         on_select(i);
                                     }
@@ -77,7 +82,10 @@ pub fn tab_bar(
                         if sel {
                             let r = resp.rect;
                             ui.painter().rect_filled(
-                                egui::Rect::from_min_max(egui::pos2(r.left(), r.top()), egui::pos2(r.right(), r.top() + 2.0)),
+                                egui::Rect::from_min_max(
+                                    egui::pos2(r.left(), r.top()),
+                                    egui::pos2(r.right(), r.top() + 2.0),
+                                ),
                                 0.0,
                                 theme::ACCENT,
                             );
@@ -101,11 +109,11 @@ pub fn breadcrumbs(ui: &mut Ui, owner: Option<&str>, repo: Option<&str>, path: &
         let last = parts.len().saturating_sub(1);
         for (i, p) in parts.iter().enumerate() {
             let is_last = i == last;
-            ui.label(
-                RichText::new(p.clone())
-                    .size(11.5)
-                    .color(if is_last { theme::TEXT } else { theme::DIM }),
-            );
+            ui.label(RichText::new(p.clone()).size(11.5).color(if is_last {
+                theme::TEXT
+            } else {
+                theme::DIM
+            }));
             if !is_last {
                 ui.label(RichText::new("/").size(11.5).color(theme::DIM));
             }
@@ -133,13 +141,14 @@ pub fn code_view_spans(ui: &mut Ui, lines: &[Vec<Span>]) {
         .auto_shrink([false, false])
         .show_rows(ui, row_h, total, |ui, range| {
             for i in range {
-                let (rect, _resp) = ui.allocate_exact_size(
-                    egui::vec2(ui.available_width(), row_h),
-                    Sense::hover(),
-                );
+                let (rect, _resp) =
+                    ui.allocate_exact_size(egui::vec2(ui.available_width(), row_h), Sense::hover());
                 // subtle gutter band
                 ui.painter().rect_filled(
-                    egui::Rect::from_min_max(egui::pos2(rect.left(), rect.top()), egui::pos2(rect.left() + gutter_w, rect.bottom())),
+                    egui::Rect::from_min_max(
+                        egui::pos2(rect.left(), rect.top()),
+                        egui::pos2(rect.left() + gutter_w, rect.bottom()),
+                    ),
                     0.0,
                     Color32::WHITE.gamma_multiply(0.02),
                 );
@@ -153,10 +162,18 @@ pub fn code_view_spans(ui: &mut Ui, lines: &[Vec<Span>]) {
                 let mut job = egui::text::LayoutJob::default();
                 let spans = lines.get(i).map(|v| v.as_slice()).unwrap_or(&[]);
                 if spans.is_empty() {
-                    job.append(" ", 0.0, egui::TextFormat::simple(font.clone(), theme::TEXT));
+                    job.append(
+                        " ",
+                        0.0,
+                        egui::TextFormat::simple(font.clone(), theme::TEXT),
+                    );
                 } else {
                     for s in spans {
-                        job.append(&s.text, 0.0, egui::TextFormat::simple(font.clone(), s.color));
+                        job.append(
+                            &s.text,
+                            0.0,
+                            egui::TextFormat::simple(font.clone(), s.color),
+                        );
                     }
                 }
                 let galley = ui.painter().layout_job(job);
@@ -179,7 +196,12 @@ pub fn code_view(ui: &mut Ui, lang: Lang, content: &str) {
 pub fn welcome(ui: &mut Ui) {
     ui.vertical_centered(|ui| {
         ui.add_space(ui.available_height() / 3.2);
-        ui.label(RichText::new("Octocrab IDE").size(30.0).color(theme::DIM).strong());
+        ui.label(
+            RichText::new("Octocrab IDE")
+                .size(30.0)
+                .color(theme::DIM)
+                .strong(),
+        );
         ui.add_space(10.0);
         ui.label(
             RichText::new("Ctrl+P quick open · Ctrl+Shift+P commands · Ctrl+B sidebar")

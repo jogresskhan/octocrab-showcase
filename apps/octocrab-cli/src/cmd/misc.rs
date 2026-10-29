@@ -99,7 +99,12 @@ pub async fn status(json: bool) -> Result<()> {
 /// Write verbs are **module-gated** by the route shape:
 /// `/orgs/…` → `org:write`, `/actions/…` → `workflow:write`, else `repo:write`.
 /// The response status and body are printed; the token stays in the vault.
-pub async fn api_call(route: String, method: String, data: Option<String>, json: bool) -> Result<()> {
+pub async fn api_call(
+    route: String,
+    method: String,
+    data: Option<String>,
+    json: bool,
+) -> Result<()> {
     use http::Method;
     let (db, octo) = open_client()?;
 
@@ -127,7 +132,11 @@ pub async fn api_call(route: String, method: String, data: Option<String>, json:
         }
     }
 
-    let route = if route.starts_with('/') { route } else { format!("/{route}") };
+    let route = if route.starts_with('/') {
+        route
+    } else {
+        format!("/{route}")
+    };
     let parsed: Option<serde_json::Value> = match (&data, is_write) {
         (Some(_), false) => anyhow::bail!("--data makes no sense with GET"),
         (Some(raw), _) => Some(
@@ -140,10 +149,19 @@ pub async fn api_call(route: String, method: String, data: Option<String>, json:
 
     let resp = match m {
         Method::GET => octo._get(route.as_str()).await?,
-        Method::POST => octo._post::<serde_json::Value>(route.as_str(), body).await?,
+        Method::POST => {
+            octo._post::<serde_json::Value>(route.as_str(), body)
+                .await?
+        }
         Method::PUT => octo._put::<serde_json::Value>(route.as_str(), body).await?,
-        Method::PATCH => octo._patch::<serde_json::Value>(route.as_str(), body).await?,
-        Method::DELETE => octo._delete::<serde_json::Value>(route.as_str(), body).await?,
+        Method::PATCH => {
+            octo._patch::<serde_json::Value>(route.as_str(), body)
+                .await?
+        }
+        Method::DELETE => {
+            octo._delete::<serde_json::Value>(route.as_str(), body)
+                .await?
+        }
         _ => unreachable!(),
     };
 
@@ -159,7 +177,10 @@ pub async fn api_call(route: String, method: String, data: Option<String>, json:
     }
     if text.trim().is_empty() {
         if json {
-            println!("{}", serde_json::to_string_pretty(&serde_json::json!({"status": status.as_u16()}))?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({"status": status.as_u16()}))?
+            );
         }
         return Ok(());
     }

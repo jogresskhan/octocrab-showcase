@@ -1,7 +1,7 @@
 //! `octocrab-ide` — a fast, data-driven, VSCode-style IDE in pure Rust.
 //!
 //! All GitHub I/O happens on background threads (`poll_promise::Promise`
-//! + one shared tokio runtime); the UI renders instantly from the SQLite
+//! plus one shared tokio runtime); the UI renders instantly from the SQLite
 //! TTL cache and swaps in fresh data when background refreshes land.
 
 mod app;

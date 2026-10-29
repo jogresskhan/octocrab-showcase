@@ -18,7 +18,11 @@ pub fn show(ui: &mut Ui, rows: &[ReleaseRow], loading: bool) {
     if loading && rows.is_empty() {
         ui.horizontal(|ui| {
             ui.spinner();
-            ui.label(RichText::new("loading releases…").color(theme::DIM).size(11.5));
+            ui.label(
+                RichText::new("loading releases…")
+                    .color(theme::DIM)
+                    .size(11.5),
+            );
         });
         return;
     }
@@ -26,28 +30,30 @@ pub fn show(ui: &mut Ui, rows: &[ReleaseRow], loading: bool) {
         ui.label(RichText::new("(no releases)").color(theme::DIM).size(11.5));
         return;
     }
-    ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        for r in rows {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(r.tag.clone()).color(theme::ACCENT).size(12.5));
-                if r.draft {
-                    widgets::badge(ui, "draft", theme::DIM);
-                }
-                if r.prerelease {
-                    widgets::badge(ui, "pre", theme::YELLOW);
-                }
-            });
-            ui.label(
-                RichText::new(format!("  {}", r.name))
-                    .size(11.5)
-                    .color(theme::TEXT),
-            );
-            ui.label(
-                RichText::new(format!("  {}", r.date))
-                    .size(10.5)
-                    .color(theme::DIM),
-            );
-            ui.add_space(3.0);
-        }
-    });
+    ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            for r in rows {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(r.tag.clone()).color(theme::ACCENT).size(12.5));
+                    if r.draft {
+                        widgets::badge(ui, "draft", theme::DIM);
+                    }
+                    if r.prerelease {
+                        widgets::badge(ui, "pre", theme::YELLOW);
+                    }
+                });
+                ui.label(
+                    RichText::new(format!("  {}", r.name))
+                        .size(11.5)
+                        .color(theme::TEXT),
+                );
+                ui.label(
+                    RichText::new(format!("  {}", r.date))
+                        .size(10.5)
+                        .color(theme::DIM),
+                );
+                ui.add_space(3.0);
+            }
+        });
 }

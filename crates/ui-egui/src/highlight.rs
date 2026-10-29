@@ -79,11 +79,54 @@ const RUST_KEYWORDS: &[&str] = &[
 ];
 
 const JS_KEYWORDS: &[&str] = &[
-    "async", "await", "break", "case", "catch", "class", "const", "continue", "default", "delete",
-    "do", "else", "enum", "export", "extends", "false", "finally", "for", "from", "function", "if",
-    "implements", "import", "in", "instanceof", "interface", "let", "new", "null", "private",
-    "protected", "public", "readonly", "return", "static", "super", "switch", "this", "throw",
-    "true", "try", "type", "typeof", "undefined", "var", "void", "while", "yield",
+    "async",
+    "await",
+    "break",
+    "case",
+    "catch",
+    "class",
+    "const",
+    "continue",
+    "default",
+    "delete",
+    "do",
+    "else",
+    "enum",
+    "export",
+    "extends",
+    "false",
+    "finally",
+    "for",
+    "from",
+    "function",
+    "if",
+    "implements",
+    "import",
+    "in",
+    "instanceof",
+    "interface",
+    "let",
+    "new",
+    "null",
+    "private",
+    "protected",
+    "public",
+    "readonly",
+    "return",
+    "static",
+    "super",
+    "switch",
+    "this",
+    "throw",
+    "true",
+    "try",
+    "type",
+    "typeof",
+    "undefined",
+    "var",
+    "void",
+    "while",
+    "yield",
 ];
 
 fn is_word_start(c: char) -> bool {
@@ -104,9 +147,14 @@ fn flush(out: &mut Vec<Span>, buf: &mut String, color: Color32) {
 }
 
 fn word_color(word: &str, keywords: &[&str]) -> Color32 {
-    if keywords.iter().any(|k| *k == word) {
+    if keywords.contains(&word) {
         KEYWORD
-    } else if word.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+    } else if word
+        .chars()
+        .next()
+        .map(|c| c.is_uppercase())
+        .unwrap_or(false)
+    {
         TYPE
     } else {
         theme::TEXT
@@ -168,7 +216,10 @@ fn hl_c_like(line: &str, st: &mut HlState, keywords: &[&str]) -> Vec<Span> {
         if c == '/' && i + 1 < n && chars[i + 1] == '/' {
             flush(&mut out, &mut plain, theme::TEXT);
             let rest: String = chars[i..].iter().collect();
-            out.push(Span { text: rest, color: COMMENT });
+            out.push(Span {
+                text: rest,
+                color: COMMENT,
+            });
             return out;
         }
         if c == '/' && i + 1 < n && chars[i + 1] == '*' {
@@ -242,46 +293,79 @@ fn hl_c_like(line: &str, st: &mut HlState, keywords: &[&str]) -> Vec<Span> {
 fn hl_toml(line: &str) -> Vec<Span> {
     let t = line.trim_start();
     if t.starts_with('#') {
-        return vec![Span { text: line.to_string(), color: COMMENT }];
+        return vec![Span {
+            text: line.to_string(),
+            color: COMMENT,
+        }];
     }
     if t.starts_with('[') {
-        return vec![Span { text: line.to_string(), color: KEYWORD }];
+        return vec![Span {
+            text: line.to_string(),
+            color: KEYWORD,
+        }];
     }
     if let Some(eq) = line.find('=') {
         let mut out = vec![
-            Span { text: line[..eq].to_string(), color: theme::YELLOW },
-            Span { text: "=".to_string(), color: theme::TEXT },
+            Span {
+                text: line[..eq].to_string(),
+                color: theme::YELLOW,
+            },
+            Span {
+                text: "=".to_string(),
+                color: theme::TEXT,
+            },
         ];
         out.extend(hl_value(&line[eq + 1..]));
         return out;
     }
-    vec![Span { text: line.to_string(), color: theme::TEXT }]
+    vec![Span {
+        text: line.to_string(),
+        color: theme::TEXT,
+    }]
 }
 
 fn hl_yaml(line: &str) -> Vec<Span> {
     let t = line.trim_start();
     if t.starts_with('#') {
-        return vec![Span { text: line.to_string(), color: COMMENT }];
+        return vec![Span {
+            text: line.to_string(),
+            color: COMMENT,
+        }];
     }
     let indent = line.len() - line.trim_start().len();
     let body = &line[indent..];
     let mut out: Vec<Span> = Vec::new();
     if indent > 0 {
-        out.push(Span { text: line[..indent].to_string(), color: theme::TEXT });
+        out.push(Span {
+            text: line[..indent].to_string(),
+            color: theme::TEXT,
+        });
     }
     if let Some(rest) = body.strip_prefix("- ") {
-        out.push(Span { text: "- ".to_string(), color: KEYWORD });
+        out.push(Span {
+            text: "- ".to_string(),
+            color: KEYWORD,
+        });
         out.extend(hl_value(rest));
         return out;
     }
     if let Some(colon) = body.find(": ") {
-        out.push(Span { text: body[..colon].to_string(), color: theme::YELLOW });
-        out.push(Span { text: ": ".to_string(), color: theme::TEXT });
+        out.push(Span {
+            text: body[..colon].to_string(),
+            color: theme::YELLOW,
+        });
+        out.push(Span {
+            text: ": ".to_string(),
+            color: theme::TEXT,
+        });
         out.extend(hl_value(&body[colon + 2..]));
         return out;
     }
     if body.ends_with(':') {
-        out.push(Span { text: body.to_string(), color: theme::YELLOW });
+        out.push(Span {
+            text: body.to_string(),
+            color: theme::YELLOW,
+        });
         return out;
     }
     out.extend(hl_value(body));
@@ -299,7 +383,10 @@ fn hl_value(s: &str) -> Vec<Span> {
         if c == '#' {
             flush(&mut out, &mut plain, theme::TEXT);
             let rest: String = chars[i..].iter().collect();
-            out.push(Span { text: rest, color: COMMENT });
+            out.push(Span {
+                text: rest,
+                color: COMMENT,
+            });
             return out;
         }
         if c == '"' || c == '\'' {
@@ -316,7 +403,10 @@ fn hl_value(s: &str) -> Vec<Span> {
                 }
                 i += 1;
             }
-            out.push(Span { text: acc, color: STRING });
+            out.push(Span {
+                text: acc,
+                color: STRING,
+            });
             continue;
         }
         if is_word_start(c) {
@@ -329,7 +419,12 @@ fn hl_value(s: &str) -> Vec<Span> {
             let color = match word.as_str() {
                 "true" | "false" | "null" | "inf" | "nan" => KEYWORD,
                 _ => {
-                    if word.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+                    if word
+                        .chars()
+                        .next()
+                        .map(|c| c.is_ascii_digit())
+                        .unwrap_or(false)
+                    {
                         NUMBER
                     } else {
                         theme::TEXT
@@ -361,16 +456,28 @@ fn hl_markdown(line: &str, st: &mut HlState) -> Vec<Span> {
     let t = line.trim_start();
     if t.starts_with("```") {
         st.fence = !st.fence;
-        return vec![Span { text: line.to_string(), color: theme::DIM }];
+        return vec![Span {
+            text: line.to_string(),
+            color: theme::DIM,
+        }];
     }
     if st.fence {
-        return vec![Span { text: line.to_string(), color: TYPE }];
+        return vec![Span {
+            text: line.to_string(),
+            color: TYPE,
+        }];
     }
     if t.starts_with('#') {
-        return vec![Span { text: line.to_string(), color: KEYWORD }];
+        return vec![Span {
+            text: line.to_string(),
+            color: KEYWORD,
+        }];
     }
     if t.starts_with('>') {
-        return vec![Span { text: line.to_string(), color: theme::DIM }];
+        return vec![Span {
+            text: line.to_string(),
+            color: theme::DIM,
+        }];
     }
     // inline pass: `code` spans, otherwise plain
     let mut out: Vec<Span> = Vec::new();
@@ -381,7 +488,10 @@ fn hl_markdown(line: &str, st: &mut HlState) -> Vec<Span> {
         if c == '`' {
             if in_code {
                 acc.push('`');
-                out.push(Span { text: std::mem::take(&mut acc), color: TYPE });
+                out.push(Span {
+                    text: std::mem::take(&mut acc),
+                    color: TYPE,
+                });
                 in_code = false;
             } else {
                 flush(&mut out, &mut plain, theme::TEXT);
@@ -401,10 +511,16 @@ fn hl_markdown(line: &str, st: &mut HlState) -> Vec<Span> {
     }
     flush(&mut out, &mut plain, theme::TEXT);
     if !acc.is_empty() {
-        out.push(Span { text: acc, color: TYPE });
+        out.push(Span {
+            text: acc,
+            color: TYPE,
+        });
     }
     if out.is_empty() {
-        out.push(Span { text: line.to_string(), color: theme::TEXT });
+        out.push(Span {
+            text: line.to_string(),
+            color: theme::TEXT,
+        });
     }
     out
 }
@@ -418,7 +534,10 @@ pub fn precompute(lang: Lang, content: &str) -> Vec<Vec<Span>> {
         out.push(highlight(lang, line, &mut st));
     }
     if out.is_empty() {
-        out.push(vec![Span { text: String::new(), color: theme::TEXT }]);
+        out.push(vec![Span {
+            text: String::new(),
+            color: theme::TEXT,
+        }]);
     }
     out
 }

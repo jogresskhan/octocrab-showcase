@@ -57,10 +57,7 @@ pub fn show(
                 .desired_width(150.0),
         );
         let idle = busy.is_none() && has_client;
-        if ui
-            .add_enabled(idle, egui::Button::new("Load"))
-            .clicked()
-        {
+        if ui.add_enabled(idle, egui::Button::new("Load")).clicked() {
             on_load();
         }
         if loading {
@@ -81,7 +78,11 @@ pub fn show(
         (None, true) => {
             ui.horizontal(|ui| {
                 ui.spinner();
-                ui.label(RichText::new("loading repository…").color(theme::DIM).size(11.5));
+                ui.label(
+                    RichText::new("loading repository…")
+                        .color(theme::DIM)
+                        .size(11.5),
+                );
             });
         }
         (None, false) => {
@@ -93,9 +94,22 @@ pub fn show(
         }
         (Some(ov), _) => {
             if !ov.description.is_empty() {
-                ui.label(RichText::new(ov.description.clone()).size(11.5).color(theme::TEXT));
+                ui.label(
+                    RichText::new(ov.description.clone())
+                        .size(11.5)
+                        .color(theme::TEXT),
+                );
             }
-            widgets::kv(ui, "homepage", if ov.homepage.is_empty() { "(none)" } else { &ov.homepage }, theme::ACCENT);
+            widgets::kv(
+                ui,
+                "homepage",
+                if ov.homepage.is_empty() {
+                    "(none)"
+                } else {
+                    &ov.homepage
+                },
+                theme::ACCENT,
+            );
             widgets::kv(ui, "stars", &format!("⭐ {}", ov.stars), theme::TEXT);
             widgets::kv(ui, "license", &ov.license, theme::TEXT);
             widgets::kv(ui, "default branch", &ov.default_branch, theme::TEXT);
@@ -146,10 +160,7 @@ pub fn show(
             "🔒 Save settings".to_string()
         };
         let enabled = busy.is_none() && has_client && can_admin;
-        if ui
-            .add_enabled(enabled, egui::Button::new(label))
-            .clicked()
-        {
+        if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
             on_save();
         }
         if !can_admin {
@@ -190,11 +201,11 @@ pub fn show(
                                 .color(if *present { theme::GREEN } else { theme::RED })
                                 .size(12.0),
                         );
-                        ui.label(
-                            RichText::new(name.clone())
-                                .size(11.5)
-                                .color(if *present { theme::TEXT } else { theme::DIM }),
-                        );
+                        ui.label(RichText::new(name.clone()).size(11.5).color(if *present {
+                            theme::TEXT
+                        } else {
+                            theme::DIM
+                        }));
                         ui.end_row();
                     }
                 });
@@ -210,18 +221,17 @@ pub fn show(
             "🔒 Scaffold community files".to_string()
         };
         let enabled = busy.is_none() && has_client && can_write;
-        if ui
-            .add_enabled(enabled, egui::Button::new(label))
-            .clicked()
-        {
+        if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
             on_scaffold();
         }
     });
     if !can_write {
         ui.label(
-            RichText::new("needs `repo:write` — renders the `community` template and pushes every file")
-                .size(10.0)
-                .color(theme::DIM),
+            RichText::new(
+                "needs `repo:write` — renders the `community` template and pushes every file",
+            )
+            .size(10.0)
+            .color(theme::DIM),
         );
     }
     if !scaffold_progress.is_empty() {

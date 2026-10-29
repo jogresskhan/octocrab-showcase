@@ -2,11 +2,11 @@
 //! craft-launcher pattern of `apps/*` + `crates/*` + `xtask`).
 //!
 //! Tasks:
-//! * `xtask sysroot`   — provision a local webkit2gtk sysroot from Debian
-//!                       packages (no root required) so the Tauri binary can
-//!                       build & run without system-wide installs
-//! * `xtask ui-check`  — run a GUI binary under Xvfb, screenshot it, exit
-//! * `xtask paths`     — print the vault / sysroot paths
+//! * `xtask sysroot` — provision a local webkit2gtk sysroot from Debian
+//!   packages (no root required) so the Tauri binary can build & run
+//!   without system-wide installs
+//! * `xtask ui-check` — run a GUI binary under Xvfb, screenshot it, exit
+//! * `xtask paths` — print the vault / sysroot paths
 
 use anyhow::{bail, Result};
 use std::process::Command;
@@ -89,11 +89,21 @@ fn sysroot() -> Result<()> {
         let entry = entry?;
         let path = entry.path();
         if path.extension().map(|e| e == "deb").unwrap_or(false) {
-            run("dpkg-deb", &["-x", path.to_string_lossy().as_ref(), sysroot_dir().to_string_lossy().as_ref()])?;
+            run(
+                "dpkg-deb",
+                &[
+                    "-x",
+                    path.to_string_lossy().as_ref(),
+                    sysroot_dir().to_string_lossy().as_ref(),
+                ],
+            )?;
             count += 1;
         }
     }
-    println!("extracted {count} packages into {}", sysroot_dir().display());
+    println!(
+        "extracted {count} packages into {}",
+        sysroot_dir().display()
+    );
 
     let env_sh = sysroot_dir().join("env.sh");
     std::fs::write(
@@ -116,9 +126,7 @@ export LIBGL_ALWAYS_SOFTWARE=1
 }
 
 fn ui_check(binary: &str) -> Result<()> {
-    let target = home()
-        .join("octocrab-suite/target/debug")
-        .join(binary);
+    let target = home().join("octocrab-suite/target/debug").join(binary);
     let target = if target.exists() {
         target
     } else {

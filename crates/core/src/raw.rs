@@ -42,10 +42,22 @@ pub async fn raw_send(
 ) -> Result<Raw> {
     let route = normalize(route);
     let resp = match method.to_ascii_uppercase().as_str() {
-        "POST" => octo._post::<serde_json::Value>(route.as_str(), body.as_ref()).await?,
-        "PUT" => octo._put::<serde_json::Value>(route.as_str(), body.as_ref()).await?,
-        "PATCH" => octo._patch::<serde_json::Value>(route.as_str(), body.as_ref()).await?,
-        "DELETE" => octo._delete::<serde_json::Value>(route.as_str(), body.as_ref()).await?,
+        "POST" => {
+            octo._post::<serde_json::Value>(route.as_str(), body.as_ref())
+                .await?
+        }
+        "PUT" => {
+            octo._put::<serde_json::Value>(route.as_str(), body.as_ref())
+                .await?
+        }
+        "PATCH" => {
+            octo._patch::<serde_json::Value>(route.as_str(), body.as_ref())
+                .await?
+        }
+        "DELETE" => {
+            octo._delete::<serde_json::Value>(route.as_str(), body.as_ref())
+                .await?
+        }
         other => anyhow::bail!("unsupported method '{other}'"),
     };
     collect(resp).await

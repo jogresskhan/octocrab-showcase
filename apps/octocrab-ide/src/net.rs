@@ -5,7 +5,10 @@
 
 use anyhow::{anyhow, bail, Result};
 use octocrab::Octocrab;
-use octocrab_ui_egui::{CommunityHealth, JobRow, PagesStatus, ReleaseRow, RepoOverview, RunRow, SearchHit, StepRow, TagRow, TreeItem, TreeKind};
+use octocrab_ui_egui::{
+    CommunityHealth, JobRow, PagesStatus, ReleaseRow, RepoOverview, RunRow, SearchHit, StepRow,
+    TagRow, TreeItem, TreeKind,
+};
 use std::sync::{Arc, OnceLock};
 
 /// The process-wide tokio runtime (multi-thread, all features enabled).
@@ -65,16 +68,18 @@ fn parse_repo_value(v: &serde_json::Value) -> Option<RepoInfo> {
 /// Preferred showcase repo, falling back to the first repo of `/user/repos`.
 pub async fn default_repo(octo: &Arc<Octocrab>) -> Result<RepoInfo> {
     let (o, r) = SHOWCASE;
-    let fut = octo.get::<serde_json::Value, _, _>(
-        format!("/repos/{o}/{r}"),
-        None::<&[(&str, &str)]>,
-    );
+    let fut =
+        octo.get::<serde_json::Value, _, _>(format!("/repos/{o}/{r}"), None::<&[(&str, &str)]>);
     if let Ok(v) = with_timeout(10, fut).await {
         if let Some(info) = parse_repo_value(&v) {
             return Ok(info);
         }
     }
-    let params = [("per_page", "30"), ("sort", "pushed"), ("affiliation", "owner")];
+    let params = [
+        ("per_page", "30"),
+        ("sort", "pushed"),
+        ("affiliation", "owner"),
+    ];
     let fut = octo.get::<serde_json::Value, _, _>("/user/repos", Some(&params));
     let v = with_timeout(10, fut).await?;
     if let Some(arr) = v.as_array() {
@@ -111,7 +116,11 @@ pub async fn fetch_tree(
         .map(|e| {
             (
                 e.path.clone(),
-                if e.r#type == "tree" { TreeKind::Dir } else { TreeKind::File },
+                if e.r#type == "tree" {
+                    TreeKind::Dir
+                } else {
+                    TreeKind::File
+                },
             )
         })
         .collect();
@@ -188,7 +197,14 @@ pub async fn fetch_runs(
                 .and_then(|x| x.as_str())
                 .map(|s| s.get(..16).unwrap_or(s).replace('T', " "))
                 .unwrap_or_default();
-            rows.push(RunRow { id, name, branch, status, conclusion, created });
+            rows.push(RunRow {
+                id,
+                name,
+                branch,
+                status,
+                conclusion,
+                created,
+            });
         }
     }
     Ok(rows)
@@ -234,7 +250,8 @@ fn fmt_secs(secs: i64) -> String {
 }
 
 fn between(a: chrono::DateTime<chrono::Utc>, b: Option<chrono::DateTime<chrono::Utc>>) -> String {
-    b.map(|b| fmt_secs((b - a).num_seconds())).unwrap_or_default()
+    b.map(|b| fmt_secs((b - a).num_seconds()))
+        .unwrap_or_default()
 }
 
 pub async fn fetch_jobs(
@@ -337,10 +354,8 @@ pub struct PullRow {
 
 pub async fn fetch_pulls(octo: &Arc<Octocrab>, owner: &str, repo: &str) -> Result<Vec<PullRow>> {
     let params = [("per_page", "30"), ("state", "open")];
-    let fut = octo.get::<serde_json::Value, _, _>(
-        format!("/repos/{owner}/{repo}/pulls"),
-        Some(&params),
-    );
+    let fut =
+        octo.get::<serde_json::Value, _, _>(format!("/repos/{owner}/{repo}/pulls"), Some(&params));
     let v = with_timeout(15, fut).await?;
     let mut rows = Vec::new();
     if let Some(arr) = v.as_array() {
@@ -395,7 +410,11 @@ pub async fn code_search(
                 .unwrap_or("")
                 .to_string();
             if !path.is_empty() {
-                hits.push(SearchHit { path, detail, gh: true });
+                hits.push(SearchHit {
+                    path,
+                    detail,
+                    gh: true,
+                });
             }
         }
     }
@@ -419,8 +438,16 @@ pub async fn list_workflows(
     let mut out = Vec::new();
     if let Some(arr) = v.get("workflows").and_then(|x| x.as_array()) {
         for w in arr {
-            let path = w.get("path").and_then(|x| x.as_str()).unwrap_or("").to_string();
-            let name = w.get("name").and_then(|x| x.as_str()).unwrap_or("").to_string();
+            let path = w
+                .get("path")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string();
+            let name = w
+                .get("name")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string();
             if !path.is_empty() {
                 out.push((path, name));
             }
@@ -471,7 +498,11 @@ pub async fn put_file(
 
 /// Render the `site` template from *live* repo data: `repos().get()` for
 /// project/description/license plus the latest release tag as the tagline.
-pub async fn site_files(octo: &Arc<Octocrab>, owner: &str, repo: &str) -> Result<Vec<(String, String)>> {
+pub async fn site_files(
+    octo: &Arc<Octocrab>,
+    owner: &str,
+    repo: &str,
+) -> Result<Vec<(String, String)>> {
     let rh = octo.repos(owner, repo);
     let repo_model = with_timeout(15, rh.get()).await?;
     let tag = with_timeout(15, rh.releases().list().per_page(1).send())
@@ -546,7 +577,9 @@ pub async fn pages_enable(octo: &Arc<Octocrab>, owner: &str, repo: &str) -> Resu
 /// Request a Pages build, then report the latest build status.
 pub async fn pages_build(octo: &Arc<Octocrab>, owner: &str, repo: &str) -> Result<PagesStatus> {
     octocrab_core::pages::request_build(octo, owner, repo).await?;
-    let build = octocrab_core::pages::latest_build(octo, owner, repo).await.ok();
+    let build = octocrab_core::pages::latest_build(octo, owner, repo)
+        .await
+        .ok();
     let build_status = || {
         build
             .as_ref()
@@ -614,9 +647,14 @@ const COMMUNITY_FILES: [(&str, &str); 6] = [
 ];
 
 /// Digest of GET /repos/{o}/{r}/community/profile.
-pub async fn community_profile(octo: &Arc<Octocrab>, owner: &str, repo: &str) -> Result<CommunityHealth> {
+pub async fn community_profile(
+    octo: &Arc<Octocrab>,
+    owner: &str,
+    repo: &str,
+) -> Result<CommunityHealth> {
     let (status, v) =
-        octocrab_core::raw::raw_get(octo, &format!("/repos/{owner}/{repo}/community/profile")).await?;
+        octocrab_core::raw::raw_get(octo, &format!("/repos/{owner}/{repo}/community/profile"))
+            .await?;
     if status >= 400 {
         bail!("community profile: HTTP {status}");
     }
@@ -629,10 +667,7 @@ pub async fn community_profile(octo: &Arc<Octocrab>, owner: &str, repo: &str) ->
         files: COMMUNITY_FILES
             .iter()
             .map(|(key, label)| {
-                let present = files_obj
-                    .get(*key)
-                    .map(|f| !f.is_null())
-                    .unwrap_or(false);
+                let present = files_obj.get(*key).map(|f| !f.is_null()).unwrap_or(false);
                 (label.to_string(), present)
             })
             .collect(),
@@ -659,7 +694,10 @@ pub async fn save_repo_settings(
     )
     .await?;
     if status >= 400 {
-        bail!("PATCH /repos failed: HTTP {status} — {}", json_str(&body, "message"));
+        bail!(
+            "PATCH /repos failed: HTTP {status} — {}",
+            json_str(&body, "message")
+        );
     }
     let (status, body) = octocrab_core::raw::raw_send(
         octo,
@@ -669,7 +707,10 @@ pub async fn save_repo_settings(
     )
     .await?;
     if status >= 400 {
-        bail!("PUT /topics failed: HTTP {status} — {}", json_str(&body, "message"));
+        bail!(
+            "PUT /topics failed: HTTP {status} — {}",
+            json_str(&body, "message")
+        );
     }
     Ok(format!(
         "settings saved · {} topic(s) updated",
@@ -705,7 +746,14 @@ pub fn walk_local_workspace(root: &str) -> Vec<TreeItem> {
         if rel.is_empty() {
             continue;
         }
-        paths.push((rel, if is_dir { TreeKind::Dir } else { TreeKind::File }));
+        paths.push((
+            rel,
+            if is_dir {
+                TreeKind::Dir
+            } else {
+                TreeKind::File
+            },
+        ));
         if paths.len() >= 100_000 {
             break;
         }

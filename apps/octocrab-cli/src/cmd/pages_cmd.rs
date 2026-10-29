@@ -27,7 +27,12 @@ pub async fn info(full_name: String, json: bool) -> Result<()> {
     println!("url:        {}", cyan(&g("html_url")));
     println!("status:     {}", g("status"));
     println!("build type: {}", g("build_type"));
-    println!("https only: {}", info.get("https_enforced").and_then(|v| v.as_bool()).unwrap_or(false));
+    println!(
+        "https only: {}",
+        info.get("https_enforced")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+    );
     Ok(())
 }
 
@@ -83,18 +88,8 @@ pub async fn build(full_name: String, json: bool) -> Result<()> {
     println!(
         "{} build queued — status: {} • commit {}",
         ok("✓"),
-        cyan(
-            latest
-                .get("status")
-                .and_then(|v| v.as_str())
-                .unwrap_or("?")
-        ),
-        dim(
-            latest
-                .get("commit")
-                .and_then(|v| v.as_str())
-                .unwrap_or("?")
-        )
+        cyan(latest.get("status").and_then(|v| v.as_str()).unwrap_or("?")),
+        dim(latest.get("commit").and_then(|v| v.as_str()).unwrap_or("?"))
     );
     Ok(())
 }
@@ -127,7 +122,9 @@ pub async fn site(full_name: String, tagline: Option<String>, json: bool) -> Res
         description: repo_json.description.clone().unwrap_or_default(),
         tagline: tagline.unwrap_or_else(|| match (&release_tag, stars) {
             (Some(t), 0) => format!("latest release {t} — built & shipped with the Octocrab Suite"),
-            (Some(t), n) => format!("latest release {t} • {n} stars — built & shipped with the Octocrab Suite"),
+            (Some(t), n) => {
+                format!("latest release {t} • {n} stars — built & shipped with the Octocrab Suite")
+            }
             (None, n) => format!("{n} stars — built & shipped with the Octocrab Suite"),
         }),
         license: repo_json
@@ -148,7 +145,10 @@ pub async fn site(full_name: String, tagline: Option<String>, json: bool) -> Res
             &repo,
             path,
             content,
-            &format!("site: regenerate landing page via octocrab-cli (release: {})", release_tag.as_deref().unwrap_or("none")),
+            &format!(
+                "site: regenerate landing page via octocrab-cli (release: {})",
+                release_tag.as_deref().unwrap_or("none")
+            ),
             None,
         )
         .await?;
@@ -173,7 +173,9 @@ pub async fn site(full_name: String, tagline: Option<String>, json: bool) -> Res
         );
         println!(
             "  {}",
-            dim(&format!("octocrab-cli workflows trigger {full_name} pages.yml --ref main"))
+            dim(&format!(
+                "octocrab-cli workflows trigger {full_name} pages.yml --ref main"
+            ))
         );
     }
     Ok(())

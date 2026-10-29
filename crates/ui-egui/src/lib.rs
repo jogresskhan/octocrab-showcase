@@ -10,7 +10,7 @@ pub mod panels;
 pub mod theme;
 pub mod widgets;
 
-pub use highlight::{Lang, HlState, Span};
+pub use highlight::{HlState, Lang, Span};
 pub use panels::editor_tabs::OpenTab;
 pub use panels::explorer::{ExplorerState, TreeItem, TreeKind};
 pub use panels::pages::PagesForm;

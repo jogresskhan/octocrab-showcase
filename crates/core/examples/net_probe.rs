@@ -8,7 +8,7 @@ async fn main() -> Result<()> {
             .get::<serde_json::Value, _, _>(route, None::<&[(&str, &str)]>)
             .await
         {
-            Ok(v) => println!("route '{route}': ok"),
+            Ok(_v) => println!("route '{route}': ok"),
             Err(e) => println!("route '{route}': FAIL {e}"),
         }
     }

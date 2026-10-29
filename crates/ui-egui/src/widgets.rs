@@ -44,7 +44,10 @@ pub fn section_header(ui: &mut Ui, text: &str) {
 pub fn locked_panel(ui: &mut Ui, module_key: &str, desc: &str) {
     egui::Frame::none()
         .fill(Color32::from_rgb(0x2a, 0x22, 0x1c))
-        .stroke(egui::Stroke::new(1.0_f32, theme::YELLOW.gamma_multiply(0.45)))
+        .stroke(egui::Stroke::new(
+            1.0_f32,
+            theme::YELLOW.gamma_multiply(0.45),
+        ))
         .inner_margin(egui::Margin::same(10.0))
         .rounding(4.0)
         .show(ui, |ui| {
@@ -83,7 +86,15 @@ pub fn parse_list(s: &str) -> Vec<String> {
 /// A dim key + coloured value row ("license:  MIT").
 pub fn kv(ui: &mut Ui, key: &str, value: &str, value_color: Color32) {
     ui.horizontal(|ui| {
-        ui.label(RichText::new(format!("{key}:")).color(theme::DIM).size(11.0));
-        ui.label(RichText::new(value.to_string()).color(value_color).size(11.5));
+        ui.label(
+            RichText::new(format!("{key}:"))
+                .color(theme::DIM)
+                .size(11.0),
+        );
+        ui.label(
+            RichText::new(value.to_string())
+                .color(value_color)
+                .size(11.5),
+        );
     });
 }

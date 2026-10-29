@@ -107,14 +107,22 @@ pub fn show(
                     egui::Align2::LEFT_CENTER,
                     t.name,
                     egui::FontId::monospace(12.5),
-                    if selected { egui::Color32::WHITE } else { theme::TEXT },
+                    if selected {
+                        egui::Color32::WHITE
+                    } else {
+                        theme::TEXT
+                    },
                 );
                 ui.painter().text(
                     egui::pos2(rect.right() - 6.0, rect.top() + 9.0),
                     egui::Align2::RIGHT_CENTER,
                     t.gate,
                     egui::FontId::monospace(10.0),
-                    if t.gate == "repo:write" { theme::GREEN } else { theme::YELLOW },
+                    if t.gate == "repo:write" {
+                        theme::GREEN
+                    } else {
+                        theme::YELLOW
+                    },
                 );
                 ui.painter().text(
                     egui::pos2(rect.left() + 6.0, rect.top() + 25.0),
@@ -263,7 +271,13 @@ pub fn progress_rows(ui: &mut Ui, progress: &[FileProgress]) {
             ui.label(
                 RichText::new(row.path.clone())
                     .size(11.5)
-                    .color(if row.done && row.ok { theme::TEXT } else if row.done { theme::RED } else { theme::DIM }),
+                    .color(if row.done && row.ok {
+                        theme::TEXT
+                    } else if row.done {
+                        theme::RED
+                    } else {
+                        theme::DIM
+                    }),
             );
         });
         if !row.detail.is_empty() {

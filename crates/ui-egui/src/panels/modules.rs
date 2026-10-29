@@ -14,7 +14,11 @@ pub fn show(ui: &mut Ui, mods: &[ModuleState], orgs: &[(String, String, bool, bo
     let granted = mods.iter().filter(|m| m.enabled).count();
     ui.label(
         RichText::new(format!("{granted}/{} modules granted", mods.len()))
-            .color(if granted > 0 { theme::GREEN } else { theme::DIM })
+            .color(if granted > 0 {
+                theme::GREEN
+            } else {
+                theme::DIM
+            })
             .size(12.0),
     );
     ui.add_space(4.0);
@@ -32,11 +36,7 @@ pub fn show(ui: &mut Ui, mods: &[ModuleState], orgs: &[(String, String, bool, bo
                 ui.horizontal(|ui| {
                     widgets::badge(ui, state_str, color);
                     ui.label(RichText::new(def.key).size(12.5).color(color));
-                    ui.label(
-                        RichText::new(def.desc)
-                            .size(11.0)
-                            .color(theme::DIM),
-                    );
+                    ui.label(RichText::new(def.desc).size(11.0).color(theme::DIM));
                 });
                 let evidence = st.map(|s| s.evidence.as_str()).unwrap_or("");
                 if !evidence.is_empty() {

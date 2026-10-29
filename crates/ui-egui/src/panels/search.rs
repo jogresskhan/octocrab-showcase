@@ -8,6 +8,7 @@ use crate::{theme, widgets, SearchHit};
 /// `hits` are pre-ranked by the caller (local + gh merged). `on_pick`
 /// receives the index of a clicked row; `on_gh_search` starts a GitHub
 /// code search when the button is pressed.
+#[allow(clippy::too_many_arguments)]
 pub fn show(
     ui: &mut Ui,
     query: &mut String,

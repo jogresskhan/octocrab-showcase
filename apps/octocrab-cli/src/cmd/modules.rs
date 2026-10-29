@@ -9,7 +9,10 @@ pub async fn list(json: bool) -> Result<()> {
     let (db, _octo) = open_client()?;
     let modules = db.modules();
     if modules.is_empty() {
-        println!("{}", warn("no capability data yet — run: octocrab-cli auth check"));
+        println!(
+            "{}",
+            warn("no capability data yet — run: octocrab-cli auth check")
+        );
         return Ok(());
     }
     if json {
@@ -41,7 +44,11 @@ pub async fn list(json: bool) -> Result<()> {
         if enabled {
             if let Some(m) = m {
                 if !m.evidence.is_empty() {
-        t.row(&["".to_string(), "".to_string(), dim(&format!("↳ {}", m.evidence))]);
+                    t.row(&[
+                        "".to_string(),
+                        "".to_string(),
+                        dim(&format!("↳ {}", m.evidence)),
+                    ]);
                 }
             }
         }
@@ -73,7 +80,11 @@ pub async fn can(key: String) -> Result<()> {
     println!(
         "{}: {}",
         key,
-        if granted { ok("granted") } else { err("locked") }
+        if granted {
+            ok("granted")
+        } else {
+            err("locked")
+        }
     );
     std::process::exit(if granted { 0 } else { 2 });
 }

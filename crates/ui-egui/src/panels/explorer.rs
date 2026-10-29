@@ -33,7 +33,12 @@ pub struct TreeItem {
 impl TreeItem {
     fn base(path: String, kind: TreeKind, depth: usize) -> Self {
         let name = path.rsplit('/').next().unwrap_or(&path).to_string();
-        Self { path, name, kind, depth }
+        Self {
+            path,
+            name,
+            kind,
+            depth,
+        }
     }
 
     /// Build flat depth-annotated rows from **sorted** relative paths,
@@ -141,7 +146,11 @@ pub fn show(
                     Align2::LEFT_CENTER,
                     &it.name,
                     font.clone(),
-                    if selected { Color32::WHITE } else { theme::TEXT },
+                    if selected {
+                        Color32::WHITE
+                    } else {
+                        theme::TEXT
+                    },
                 );
                 if resp.clicked() {
                     match it.kind {

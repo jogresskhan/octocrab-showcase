@@ -135,6 +135,7 @@ enum Cmd {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum TemplatesCmd {
     /// List available templates
     List {
@@ -572,7 +573,10 @@ enum DbCmd {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    use cmd::{achievements as ach, auth, issues, misc, modules, orgs, pages_cmd, repos, releases, templates, workflows};
+    use cmd::{
+        achievements as ach, auth, issues, misc, modules, orgs, pages_cmd, releases, repos,
+        templates, workflows,
+    };
     match cli.cmd {
         Cmd::Auth { cmd } => match cmd {
             AuthCmd::Set { label, stdin, file } => auth::set(label, stdin, file).await,
@@ -590,51 +594,98 @@ async fn main() -> Result<()> {
         Cmd::Repos { cmd } => match cmd {
             ReposCmd::List { limit, json } => repos::list(limit, json).await,
             ReposCmd::Get { repo, json } => repos::get(repo, json).await,
-            ReposCmd::Create { name, desc, public, json } => {
-                repos::create(name, desc, public, json).await
-            }
-            ReposCmd::Upload { repo, path, file, message, branch } => {
-                repos::upload(repo, path, file, message, branch).await
-            }
+            ReposCmd::Create {
+                name,
+                desc,
+                public,
+                json,
+            } => repos::create(name, desc, public, json).await,
+            ReposCmd::Upload {
+                repo,
+                path,
+                file,
+                message,
+                branch,
+            } => repos::upload(repo, path, file, message, branch).await,
             ReposCmd::File { repo, path, ref_ } => repos::file(repo, path, ref_).await,
-            ReposCmd::Edit { repo, desc, homepage, topics, issues, wiki, discussions, json } => {
-                repos::edit(repo, desc, homepage, topics, issues, wiki, discussions, json).await
+            ReposCmd::Edit {
+                repo,
+                desc,
+                homepage,
+                topics,
+                issues,
+                wiki,
+                discussions,
+                json,
+            } => {
+                repos::edit(
+                    repo,
+                    desc,
+                    homepage,
+                    topics,
+                    issues,
+                    wiki,
+                    discussions,
+                    json,
+                )
+                .await
             }
             ReposCmd::Community { repo, json } => repos::community(repo, json).await,
-            ReposCmd::Scaffold { repo, contact, json } => {
-                repos::scaffold(repo, contact, json).await
-            }
+            ReposCmd::Scaffold {
+                repo,
+                contact,
+                json,
+            } => repos::scaffold(repo, contact, json).await,
         },
         Cmd::Issues { cmd } => match cmd {
-            IssuesCmd::List { repo, state, limit, json } => {
-                issues::issues_list(repo, state, limit, json).await
+            IssuesCmd::List {
+                repo,
+                state,
+                limit,
+                json,
+            } => issues::issues_list(repo, state, limit, json).await,
+            IssuesCmd::Create { repo, title, body } => {
+                issues::issues_create(repo, title, body).await
             }
-            IssuesCmd::Create { repo, title, body } => issues::issues_create(repo, title, body).await,
-            IssuesCmd::Comment { repo, number, body } => issues::issues_comment(repo, number, body).await,
+            IssuesCmd::Comment { repo, number, body } => {
+                issues::issues_comment(repo, number, body).await
+            }
             IssuesCmd::Close { repo, number } => issues::issues_close(repo, number).await,
         },
         Cmd::Pulls { cmd } => match cmd {
-            PullsCmd::List { repo, state, limit, json } => {
-                issues::pulls_list(repo, state, limit, json).await
-            }
+            PullsCmd::List {
+                repo,
+                state,
+                limit,
+                json,
+            } => issues::pulls_list(repo, state, limit, json).await,
         },
         Cmd::Workflows { cmd } => match cmd {
             WorkflowsCmd::List { repo, json } => workflows::list(repo, json).await,
-            WorkflowsCmd::Runs { repo, branch, limit, json } => {
-                workflows::runs(repo, branch, limit, json).await
-            }
+            WorkflowsCmd::Runs {
+                repo,
+                branch,
+                limit,
+                json,
+            } => workflows::runs(repo, branch, limit, json).await,
             WorkflowsCmd::Run { repo, run_id, json } => {
                 workflows::run_view(repo, run_id, json).await
             }
             WorkflowsCmd::Trace { repo, run_id, json } => {
                 workflows::trace(repo, run_id, json).await
             }
-            WorkflowsCmd::Trigger { repo, workflow, ref_, inputs, json } => {
-                workflows::trigger(repo, workflow, ref_, inputs, json).await
-            }
-            WorkflowsCmd::Watch { repo, run_id, interval } => {
-                workflows::watch(repo, run_id, interval).await
-            }
+            WorkflowsCmd::Trigger {
+                repo,
+                workflow,
+                ref_,
+                inputs,
+                json,
+            } => workflows::trigger(repo, workflow, ref_, inputs, json).await,
+            WorkflowsCmd::Watch {
+                repo,
+                run_id,
+                interval,
+            } => workflows::watch(repo, run_id, interval).await,
             WorkflowsCmd::Rerun { repo, run_id } => workflows::rerun(repo, run_id).await,
             WorkflowsCmd::Cancel { repo, run_id } => workflows::cancel(repo, run_id).await,
         },
@@ -642,9 +693,15 @@ async fn main() -> Result<()> {
             ReleasesCmd::List { repo, limit, json } => releases::list(repo, limit, json).await,
             ReleasesCmd::Latest { repo, json } => releases::latest(repo, json).await,
             ReleasesCmd::Get { repo, tag, json } => releases::get_by_tag(repo, tag, json).await,
-            ReleasesCmd::Create { repo, tag, name, notes, prerelease, draft, json } => {
-                releases::create(repo, tag, name, notes, prerelease, draft, json).await
-            }
+            ReleasesCmd::Create {
+                repo,
+                tag,
+                name,
+                notes,
+                prerelease,
+                draft,
+                json,
+            } => releases::create(repo, tag, name, notes, prerelease, draft, json).await,
         },
         Cmd::Tags { repo, limit, json } => repos::tags(repo, limit, json).await,
         Cmd::Orgs { cmd } => match cmd {
@@ -669,7 +726,12 @@ async fn main() -> Result<()> {
             DbCmd::Path => misc::db_info(true).await,
             DbCmd::Info => misc::db_info(false).await,
         },
-        Cmd::Api { route, method, data, json } => misc::api_call(route, method, data, json).await,
+        Cmd::Api {
+            route,
+            method,
+            data,
+            json,
+        } => misc::api_call(route, method, data, json).await,
         Cmd::Templates { cmd } => match cmd {
             TemplatesCmd::List { json } => templates::list(json).await,
             TemplatesCmd::Install {
@@ -704,9 +766,11 @@ async fn main() -> Result<()> {
             PagesCmd::Info { repo, json } => pages_cmd::info(repo, json).await,
             PagesCmd::Enable { repo, json } => pages_cmd::enable(repo, json).await,
             PagesCmd::Build { repo, json } => pages_cmd::build(repo, json).await,
-            PagesCmd::Site { repo, tagline, json } => {
-                pages_cmd::site(repo, tagline, json).await
-            }
+            PagesCmd::Site {
+                repo,
+                tagline,
+                json,
+            } => pages_cmd::site(repo, tagline, json).await,
         },
         Cmd::Status { json } => misc::status(json).await,
     }
