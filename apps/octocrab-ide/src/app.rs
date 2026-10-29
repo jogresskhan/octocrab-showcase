@@ -10,8 +10,14 @@ use egui::{Color32, Context, Key, RichText, Ui};
 use octocrab::Octocrab;
 use octocrab_core::cache::{self, TTL_LONG, TTL_MEDIUM, TTL_SHORT};
 use octocrab_core::db::{ModuleState, SuiteDb};
-use octocrab_ui_egui::panels::{editor_tabs, explorer, modules, releases, search, tags, workflows};
-use octocrab_ui_egui::{highlight, theme, widgets, JobRow, Lang, OpenTab, ReleaseRow, RunRow, SearchHit, Span, TagRow, TreeItem};
+use octocrab_ui_egui::panels::{
+    editor_tabs, explorer, modules, releases, search, tags, workflows,
+    pages as pages_panel, repo as repo_panel, templates as templates_panel,
+};
+use octocrab_ui_egui::{
+    highlight, theme, widgets, CommunityHealth, FileProgress, JobRow, Lang, OpenTab, PagesStatus,
+    ReleaseRow, RepoEdits, RepoOverview, RunRow, SearchHit, Span, TagRow, TreeItem,
+};
 use poll_promise::Promise;
 
 use crate::{fuzzy, net};
@@ -23,6 +29,51 @@ fn db_lock(db: &Arc<Mutex<SuiteDb>>) -> MutexGuard<'_, SuiteDb> {
         Ok(g) => g,
         Err(p) => p.into_inner(),
     }
+}
+
+fn progress_lock(p: &Arc<Mutex<Vec<FileProgress>>>) -> MutexGuard<'_, Vec<FileProgress>> {
+    match p.lock() {
+        Ok(g) => g,
+        Err(p) => p.into_inner(),
+    }
+}
+
+fn progress_snapshot(p: &Arc<Mutex<Vec<FileProgress>>>) -> Vec<FileProgress> {
+    progress_lock(p).clone()
+}
+
+/// Push a pre-rendered file list through the Contents API on the *current*
+/// (background) thread, updating the shared per-file progress rows live.
+fn push_files_sync(
+    octo: Arc<Octocrab>,
+    owner: String,
+    repo: String,
+    files: Vec<(String, String)>,
+    message: String,
+    progress: Arc<Mutex<Vec<FileProgress>>>,
+) -> Vec<FileProgress> {
+    {
+        let mut rows = progress_lock(&progress);
+        *rows = files
+            .iter()
+            .map(|(p, _)| FileProgress { path: p.clone(), ..Default::default() })
+            .collect();
+    }
+    let mut out = Vec::new();
+    for (i, (path, content)) in files.into_iter().enumerate() {
+        let res = net::block_on(net::put_file(&octo, &owner, &repo, &path, &content, &message, None));
+        let (ok, detail) = match res {
+            Ok(url) => (true, url),
+            Err(e) => (false, format!("{e}")),
+        };
+        out.push(FileProgress { path: path.clone(), done: true, ok, detail: detail.clone() });
+        if let Some(row) = progress_lock(&progress).get_mut(i) {
+            row.done = true;
+            row.ok = ok;
+            row.detail = detail;
+        }
+    }
+    out
 }
 
 fn hash_str(s: &str) -> u64 {
@@ -63,6 +114,9 @@ pub enum Activity {
     Pulls,
     Workflows,
     Releases,
+    Templates,
+    Pages,
+    Repo,
     Account,
 }
 
@@ -77,6 +131,13 @@ enum Center {
     Editor,
     RunJobs(u64),
     Modules,
+}
+
+#[derive(Clone, Copy)]
+enum PagesOp {
+    Status,
+    Enable,
+    Build,
 }
 
 #[derive(Clone)]
@@ -96,7 +157,6 @@ enum Command {
 #[derive(Clone)]
 struct TreePayload {
     items: Vec<TreeItem>,
-    github: bool,
     truncated: bool,
 }
 
@@ -184,6 +244,35 @@ pub struct IdeApp {
     gh_busy: bool,
     gh_err: Option<String>,
     code_p: Option<Promise<Result<Vec<SearchHit>, String>>>,
+
+    // templates panel
+    tpl_form: templates_panel::TemplatesForm,
+    tpl_progress: Arc<Mutex<Vec<FileProgress>>>,
+    tpl_installing: bool,
+    tpl_err: Option<String>,
+    tpl_p: Option<Promise<Result<Vec<FileProgress>, String>>>,
+
+    // pages panel
+    pages_form: pages_panel::PagesForm,
+    pages_info: Option<PagesStatus>,
+    pages_busy: Option<&'static str>,
+    pages_err: Option<String>,
+    pages_progress: Arc<Mutex<Vec<FileProgress>>>,
+    pages_p: Option<Promise<Result<PagesStatus, String>>>,
+    pages_gen_p: Option<Promise<Result<Vec<FileProgress>, String>>>,
+
+    // repo panel
+    repo_form: repo_panel::RepoForm,
+    repo_overview: Option<RepoOverview>,
+    repo_edits: RepoEdits,
+    repo_community: Option<CommunityHealth>,
+    repo_loading: bool,
+    repo_busy: Option<&'static str>,
+    repo_err: Option<String>,
+    rpanel_p: Option<Promise<Result<(RepoOverview, Option<CommunityHealth>), String>>>,
+    repo_save_p: Option<Promise<Result<String, String>>>,
+    repo_scaffold_progress: Arc<Mutex<Vec<FileProgress>>>,
+    repo_scaffold_p: Option<Promise<Result<Vec<FileProgress>, String>>>,
 
     // palette
     palette_open: bool,
@@ -282,6 +371,29 @@ impl IdeApp {
             gh_busy: false,
             gh_err: None,
             code_p: None,
+            tpl_form: templates_panel::TemplatesForm::default(),
+            tpl_progress: Arc::new(Mutex::new(vec![])),
+            tpl_installing: false,
+            tpl_err: None,
+            tpl_p: None,
+            pages_form: pages_panel::PagesForm::default(),
+            pages_info: None,
+            pages_busy: None,
+            pages_err: None,
+            pages_progress: Arc::new(Mutex::new(vec![])),
+            pages_p: None,
+            pages_gen_p: None,
+            repo_form: repo_panel::RepoForm::default(),
+            repo_overview: None,
+            repo_edits: RepoEdits::default(),
+            repo_community: None,
+            repo_loading: false,
+            repo_busy: None,
+            repo_err: None,
+            rpanel_p: None,
+            repo_save_p: None,
+            repo_scaffold_progress: Arc::new(Mutex::new(vec![])),
+            repo_scaffold_p: None,
             palette_open: false,
             palette_cmds: false,
             palette_q: String::new(),
@@ -292,9 +404,12 @@ impl IdeApp {
 
         // local workspace tree immediately (background thread)
         app.ensure_tree();
-        // identity + default repo (background, 10s timeouts inside)
-        app.spawn_identity();
-        app.spawn_repo_fetch();
+        if !selftest {
+            // identity + default repo (background, 10s timeouts inside)
+            // skipped in selftest mode: no network I/O at all
+            app.spawn_identity();
+            app.spawn_repo_fetch();
+        }
         app
     }
 
@@ -331,12 +446,6 @@ impl IdeApp {
         }));
     }
 
-    fn tree_key(&self) -> Option<String> {
-        self.repo
-            .as_ref()
-            .map(|r| format!("repo:{}/{}:tree:{}", r.owner, r.name, self.branch))
-    }
-
     fn ensure_tree(&mut self) {
         if self.tree_p.is_some() {
             return;
@@ -348,7 +457,6 @@ impl IdeApp {
                 self.tree_p = Some(spawn(|| {
                     Ok(TreePayload {
                         items: net::walk_local_workspace(LOCAL_ROOT),
-                        github: false,
                         truncated: false,
                     })
                 }));
@@ -387,7 +495,7 @@ impl IdeApp {
                                 let db = db_lock(&db);
                                 cache::set_json(&db, &key, &items, TTL_LONG);
                             }
-                            Ok(TreePayload { items, github: true, truncated: trunc })
+                            Ok(TreePayload { items, truncated: trunc })
                         }
                         Err(e) => Err(format!("{e}")),
                     }
@@ -734,6 +842,300 @@ impl IdeApp {
         }));
     }
 
+    // --------------------------------------------------- templates panel
+
+    /// Prefill panel target fields from the resolved repository (kept
+    /// non-destructive: only fills empty fields).
+    fn prefill_panel_forms(&mut self) {
+        let Some(repo) = self.repo.clone() else { return };
+        let full = format!("{}/{}", repo.owner, repo.name);
+        if self.tpl_form.repo.trim().is_empty() {
+            self.tpl_form.repo = full.clone();
+        }
+        if self.tpl_form.project.trim().is_empty() {
+            self.tpl_form.project = repo.name.clone();
+        }
+        if self.tpl_form.tagline.trim().is_empty() {
+            self.tpl_form.tagline = self
+                .repo_overview
+                .as_ref()
+                .map(|ov| ov.description.clone())
+                .unwrap_or_default();
+        }
+        if self.pages_form.repo.trim().is_empty() {
+            self.pages_form.repo = full.clone();
+        }
+        if self.repo_form.repo.trim().is_empty() {
+            self.repo_form.repo = full;
+        }
+    }
+
+    fn on_template_selected(&mut self, idx: usize) {
+        self.tpl_form.selected = idx;
+        self.tpl_err = None;
+        self.prefill_panel_forms();
+    }
+
+    /// Render the selected template and push every file (background).
+    fn install_template(&mut self) {
+        self.tpl_err = None;
+        let def = templates_panel::selected_def(&self.tpl_form);
+        if !self.module_enabled(def.gate) {
+            self.tpl_err =
+                Some(format!("module `{}` is not granted — cannot install `{}`", def.gate, def.key));
+            return;
+        }
+        let Some(octo) = self.octo.clone() else {
+            self.tpl_err = Some("offline — no GitHub client".into());
+            return;
+        };
+        let Some((o, r)) = widgets::parse_repo(&self.tpl_form.repo) else {
+            self.tpl_err = Some("repo must look like OWNER/REPO".into());
+            return;
+        };
+        if self.tpl_installing {
+            return;
+        }
+        let (description, license, contact) = match &self.repo_overview {
+            Some(ov) => (ov.description.clone(), ov.license.clone(), String::new()),
+            None => (String::new(), "MIT".to_string(), String::new()),
+        };
+        let params = templates_panel::build_params(
+            &self.tpl_form,
+            &o,
+            &r,
+            &description,
+            &license,
+            &contact,
+            &self.branch,
+        );
+        let key = def.key.to_string();
+        let message = format!("octocrab-ide: install template `{key}`");
+        let progress = self.tpl_progress.clone();
+        self.tpl_installing = true;
+        self.status = format!("installing template `{key}` into {o}/{r}…");
+        self.tpl_p = Some(spawn(move || {
+            let files = match octocrab_core::templates::render(&key, &params) {
+                Ok(files) => files,
+                Err(e) => return Err(format!("render failed: {e}")),
+            };
+            Ok(push_files_sync(octo, o, r, files, message, progress))
+        }));
+    }
+
+    // ------------------------------------------------------ pages panel
+
+    fn pages_target(&self) -> Result<(String, String), String> {
+        widgets::parse_repo(&self.pages_form.repo)
+            .ok_or_else(|| "repo must look like OWNER/REPO".to_string())
+    }
+
+    fn pages_op(&mut self, op: PagesOp) {
+        self.pages_err = None;
+        let Some(octo) = self.octo.clone() else {
+            self.pages_err = Some("offline — no GitHub client".into());
+            return;
+        };
+        let (o, r) = match self.pages_target() {
+            Ok(t) => t,
+            Err(e) => {
+                self.pages_err = Some(e);
+                return;
+            }
+        };
+        if self.pages_busy.is_some() {
+            return;
+        }
+        match op {
+            PagesOp::Status => {
+                self.pages_busy = Some("fetching pages status");
+                self.pages_p = Some(spawn(move || {
+                    net::block_on(net::pages_status(&octo, &o, &r)).map_err(|e| format!("{e}"))
+                }));
+            }
+            PagesOp::Enable => {
+                if !self.module_enabled("repo:admin") {
+                    self.pages_err = Some("repo:admin not granted — cannot enable Pages".into());
+                    return;
+                }
+                self.pages_busy = Some("enabling Pages");
+                self.pages_p = Some(spawn(move || {
+                    net::block_on(net::pages_enable(&octo, &o, &r)).map_err(|e| format!("{e}"))
+                }));
+            }
+            PagesOp::Build => {
+                if !self.module_enabled("repo:write") {
+                    self.pages_err = Some("repo:write not granted — cannot request builds".into());
+                    return;
+                }
+                self.pages_busy = Some("requesting build");
+                self.pages_p = Some(spawn(move || {
+                    net::block_on(net::pages_build(&octo, &o, &r)).map_err(|e| format!("{e}"))
+                }));
+            }
+        }
+    }
+
+    /// Render the `site` template from live repo data + push site/ files.
+    fn generate_site(&mut self) {
+        self.pages_err = None;
+        let Some(octo) = self.octo.clone() else {
+            self.pages_err = Some("offline — no GitHub client".into());
+            return;
+        };
+        let (o, r) = match self.pages_target() {
+            Ok(t) => t,
+            Err(e) => {
+                self.pages_err = Some(e);
+                return;
+            }
+        };
+        if !self.module_enabled("repo:write") {
+            self.pages_err = Some("repo:write not granted — cannot generate the site".into());
+            return;
+        }
+        if self.pages_busy.is_some() {
+            return;
+        }
+        let progress = self.pages_progress.clone();
+        self.pages_busy = Some("generating site");
+        self.status = format!("generating Pages site for {o}/{r}…");
+        self.pages_gen_p = Some(spawn(move || {
+            let files = match net::block_on(net::site_files(&octo, &o, &r)) {
+                Ok(files) => files,
+                Err(e) => return Err(format!("site render failed: {e}")),
+            };
+            Ok(push_files_sync(
+                octo,
+                o.clone(),
+                r.clone(),
+                files,
+                "docs: generate GitHub Pages landing site (octocrab-ide)".into(),
+                progress,
+            ))
+        }));
+    }
+
+    // ------------------------------------------------------- repo panel
+
+    fn repo_target(&self) -> Result<(String, String), String> {
+        widgets::parse_repo(&self.repo_form.repo)
+            .ok_or_else(|| "repo must look like OWNER/REPO".to_string())
+    }
+
+    /// Load overview + community health (one background thread, two GETs).
+    fn repo_load(&mut self) {
+        self.repo_err = None;
+        let Some(octo) = self.octo.clone() else {
+            self.repo_err = Some("offline — no GitHub client".into());
+            return;
+        };
+        let (o, r) = match self.repo_target() {
+            Ok(t) => t,
+            Err(e) => {
+                self.repo_err = Some(e);
+                return;
+            }
+        };
+        if self.repo_loading || self.repo_busy.is_some() {
+            return;
+        }
+        self.repo_loading = true;
+        self.status = format!("loading {o}/{r}…");
+        self.rpanel_p = Some(spawn(move || {
+            let overview = net::block_on(net::repo_overview(&octo, &o, &r))
+                .map_err(|e| format!("{e}"))?;
+            // community profile is best-effort (404 → None)
+            let community = net::block_on(net::community_profile(&octo, &o, &r)).ok();
+            Ok((overview, community))
+        }));
+    }
+
+    /// PATCH /repos + PUT /topics with the edited fields (repo:admin).
+    fn repo_save(&mut self) {
+        self.repo_err = None;
+        let Some(octo) = self.octo.clone() else {
+            self.repo_err = Some("offline — no GitHub client".into());
+            return;
+        };
+        if !self.module_enabled("repo:admin") {
+            self.repo_err = Some("repo:admin not granted — cannot save settings".into());
+            return;
+        }
+        let (o, r) = match self.repo_target() {
+            Ok(t) => t,
+            Err(e) => {
+                self.repo_err = Some(e);
+                return;
+            }
+        };
+        if self.repo_busy.is_some() || self.repo_loading {
+            return;
+        }
+        let description = self.repo_edits.description.trim().to_string();
+        let homepage = self.repo_edits.homepage.trim().to_string();
+        let topics = widgets::parse_list(&self.repo_edits.topics);
+        self.repo_busy = Some("saving settings");
+        self.status = format!("saving {o}/{r} settings…");
+        self.repo_save_p = Some(spawn(move || {
+            net::block_on(net::save_repo_settings(&octo, &o, &r, &description, &homepage, &topics))
+                .map_err(|e| format!("{e}"))
+        }));
+    }
+
+    /// Render the `community` template + push every file (repo:write).
+    fn repo_scaffold(&mut self) {
+        self.repo_err = None;
+        let Some(octo) = self.octo.clone() else {
+            self.repo_err = Some("offline — no GitHub client".into());
+            return;
+        };
+        if !self.module_enabled("repo:write") {
+            self.repo_err = Some("repo:write not granted — cannot scaffold community files".into());
+            return;
+        }
+        let (o, r) = match self.repo_target() {
+            Ok(t) => t,
+            Err(e) => {
+                self.repo_err = Some(e);
+                return;
+            }
+        };
+        if self.repo_busy.is_some() || self.repo_loading {
+            return;
+        }
+        let (description, license) = match &self.repo_overview {
+            Some(ov) => (ov.description.clone(), ov.license.clone()),
+            None => (String::new(), "MIT".to_string()),
+        };
+        let params = octocrab_core::templates::TemplateParams {
+            project: r.clone(),
+            owner: o.clone(),
+            repo: r.clone(),
+            description,
+            license,
+            contact: self.login.clone().unwrap_or_default(),
+            ..Default::default()
+        };
+        let progress = self.repo_scaffold_progress.clone();
+        self.repo_busy = Some("scaffolding community files");
+        self.status = format!("scaffolding community files in {o}/{r}…");
+        self.repo_scaffold_p = Some(spawn(move || {
+            let files = match octocrab_core::templates::render("community", &params) {
+                Ok(files) => files,
+                Err(e) => return Err(format!("render failed: {e}")),
+            };
+            Ok(push_files_sync(
+                octo,
+                o.clone(),
+                r.clone(),
+                files,
+                "docs: scaffold community health files (octocrab-ide)".into(),
+                progress,
+            ))
+        }));
+    }
+
     fn dispatch_first_workflow(&mut self) {
         if !self.module_enabled("workflow:write") {
             self.status = "workflow:write not granted".into();
@@ -788,6 +1190,7 @@ impl IdeApp {
             }
             Activity::Pulls => self.ensure_pulls(false),
             Activity::Account => self.center = Center::Modules,
+            Activity::Templates | Activity::Pages | Activity::Repo => self.prefill_panel_forms(),
             _ => {}
         }
     }
@@ -860,7 +1263,7 @@ impl IdeApp {
             .map(|(k, _)| k.clone())
             .collect();
         for path in ready {
-            if let Some(mut p) = self.file_ps.remove(&path) {
+            if let Some(p) = self.file_ps.remove(&path) {
                 let res = p.ready().cloned();
                 self.file_inflight.remove(&path);
                 match res {
@@ -980,6 +1383,86 @@ impl IdeApp {
                 Err(e) => self.status = format!("dispatch failed: {e}"),
             }
         }
+        // templates install
+        if let Some(res) = take_owned(&mut self.tpl_p) {
+            self.tpl_installing = false;
+            match res {
+                Ok(rows) => {
+                    let okc = rows.iter().filter(|r| r.ok).count();
+                    self.status = format!("template install finished: {okc}/{} file(s) pushed", rows.len());
+                }
+                Err(e) => self.tpl_err = Some(e),
+            }
+        }
+        // pages status/enable/build
+        if let Some(res) = take_owned(&mut self.pages_p) {
+            self.pages_busy = None;
+            match res {
+                Ok(st) => {
+                    self.status = if st.enabled {
+                        format!("pages: {} ({})", st.html_url, st.build_status)
+                    } else {
+                        "pages: not enabled".into()
+                    };
+                    self.pages_info = Some(st);
+                    self.pages_err = None;
+                }
+                Err(e) => self.pages_err = Some(e),
+            }
+        }
+        // pages site generation
+        if let Some(res) = take_owned(&mut self.pages_gen_p) {
+            self.pages_busy = None;
+            match res {
+                Ok(rows) => {
+                    let okc = rows.iter().filter(|r| r.ok).count();
+                    self.status = format!("site generation finished: {okc}/{} file(s) pushed", rows.len());
+                }
+                Err(e) => self.pages_err = Some(e),
+            }
+        }
+        // repo overview load
+        if let Some(res) = take_owned(&mut self.rpanel_p) {
+            self.repo_loading = false;
+            match res {
+                Ok((ov, community)) => {
+                    self.repo_edits.description = ov.description.clone();
+                    self.repo_edits.homepage = ov.homepage.clone();
+                    self.repo_edits.topics = ov.topics.join(", ");
+                    self.repo_overview = Some(ov);
+                    self.repo_community = community;
+                    self.repo_err = None;
+                    self.status = "repository info loaded".into();
+                }
+                Err(e) => self.repo_err = Some(e),
+            }
+        }
+        // repo settings save
+        if let Some(res) = take_owned(&mut self.repo_save_p) {
+            self.repo_busy = None;
+            match res {
+                Ok(msg) => {
+                    self.status = msg;
+                    if let Some(ov) = &mut self.repo_overview {
+                        ov.description = self.repo_edits.description.trim().to_string();
+                        ov.homepage = self.repo_edits.homepage.trim().to_string();
+                        ov.topics = widgets::parse_list(&self.repo_edits.topics);
+                    }
+                }
+                Err(e) => self.repo_err = Some(format!("save failed: {e}")),
+            }
+        }
+        // repo community scaffold
+        if let Some(res) = take_owned(&mut self.repo_scaffold_p) {
+            self.repo_busy = None;
+            match res {
+                Ok(rows) => {
+                    let okc = rows.iter().filter(|r| r.ok).count();
+                    self.status = format!("community scaffold finished: {okc}/{} file(s) pushed", rows.len());
+                }
+                Err(e) => self.repo_err = Some(format!("scaffold failed: {e}")),
+            }
+        }
     }
 
     fn any_inflight(&self) -> bool {
@@ -994,6 +1477,11 @@ impl IdeApp {
             || self.pulls_p.is_some()
             || self.code_p.is_some()
             || self.dispatch_p.is_some()
+            || self.tpl_p.is_some()
+            || self.pages_p.is_some()
+            || self.pages_gen_p.is_some()
+            || self.repo_save_p.is_some()
+            || self.repo_scaffold_p.is_some()
     }
 
     // -------------------------------------------------------- shortcuts
@@ -1176,6 +1664,9 @@ impl IdeApp {
                         ("🌿", "Source Control (open PRs)", Activity::Pulls),
                         ("⚙", "Workflows", Activity::Workflows),
                         ("🏷", "Releases & Tags", Activity::Releases),
+                        ("🧩", "Templates", Activity::Templates),
+                        ("🌐", "GitHub Pages", Activity::Pages),
+                        ("🦀", "Repository & Community", Activity::Repo),
                         ("👤", "Account & Modules", Activity::Account),
                     ];
                     for (icon, tip, act) in items {
@@ -1191,7 +1682,9 @@ impl IdeApp {
                             Color32::TRANSPARENT
                         })
                         .min_size(egui::vec2(34.0, 32.0));
-                        if ui.add(btn).clicked() {
+                        let mut resp = ui.add(btn);
+                        resp = resp.on_hover_text(tip);
+                        if resp.clicked() {
                             if self.activity != act {
                                 self.activity = act;
                                 self.on_activity_changed();
@@ -1225,6 +1718,9 @@ impl IdeApp {
                 Activity::Pulls => self.sidebar_pulls(ui),
                 Activity::Workflows => self.sidebar_workflows(ui),
                 Activity::Releases => self.sidebar_releases(ui),
+                Activity::Templates => self.sidebar_templates(ui),
+                Activity::Pages => self.sidebar_pages(ui),
+                Activity::Repo => self.sidebar_repo(ui),
                 Activity::Account => self.sidebar_account(ui),
             });
     }
@@ -1452,6 +1948,116 @@ impl IdeApp {
         tags::show(ui, &self.tags, self.tags_loading);
     }
 
+    fn sidebar_templates(&mut self, ui: &mut Ui) {
+        let gate = templates_panel::selected_def(&self.tpl_form).gate;
+        let gate_ok = self.module_enabled(gate);
+        let has_client = self.octo.is_some();
+        let installing = self.tpl_installing;
+        let progress = progress_snapshot(&self.tpl_progress);
+        let err = self.tpl_err.clone();
+
+        let mut selected: Option<usize> = None;
+        let mut do_install = false;
+        templates_panel::show(
+            ui,
+            &mut self.tpl_form,
+            &progress,
+            installing,
+            has_client,
+            gate_ok,
+            err.as_deref(),
+            &mut |i| selected = Some(i),
+            &mut || do_install = true,
+        );
+        if let Some(i) = selected {
+            self.on_template_selected(i);
+        }
+        if do_install {
+            self.install_template();
+        }
+    }
+
+    fn sidebar_pages(&mut self, ui: &mut Ui) {
+        let has_client = self.octo.is_some();
+        let can_admin = self.module_enabled("repo:admin");
+        let can_write = self.module_enabled("repo:write");
+        let busy = self.pages_busy;
+        let err = self.pages_err.clone();
+        let progress = progress_snapshot(&self.pages_progress);
+
+        let mut do_status = false;
+        let mut do_enable = false;
+        let mut do_build = false;
+        let mut do_generate = false;
+        pages_panel::show(
+            ui,
+            &mut self.pages_form,
+            self.pages_info.as_ref(),
+            busy,
+            err.as_deref(),
+            &progress,
+            can_admin,
+            can_write,
+            has_client,
+            &mut || do_status = true,
+            &mut || do_enable = true,
+            &mut || do_build = true,
+            &mut || do_generate = true,
+        );
+        if do_status {
+            self.pages_op(PagesOp::Status);
+        }
+        if do_enable {
+            self.pages_op(PagesOp::Enable);
+        }
+        if do_build {
+            self.pages_op(PagesOp::Build);
+        }
+        if do_generate {
+            self.generate_site();
+        }
+    }
+
+    fn sidebar_repo(&mut self, ui: &mut Ui) {
+        let has_client = self.octo.is_some();
+        let can_admin = self.module_enabled("repo:admin");
+        let can_write = self.module_enabled("repo:write");
+        let loading = self.repo_loading;
+        let busy = self.repo_busy;
+        let err = self.repo_err.clone();
+        let scaffold_progress = progress_snapshot(&self.repo_scaffold_progress);
+
+        let mut do_load = false;
+        let mut do_save = false;
+        let mut do_scaffold = false;
+        repo_panel::show(
+            ui,
+            &mut self.repo_form,
+            self.repo_overview.as_ref(),
+            &mut self.repo_edits,
+            self.repo_community.as_ref(),
+            loading,
+            busy,
+            err.as_deref(),
+            &scaffold_progress,
+            can_admin,
+            can_write,
+            has_client,
+            &mut || do_load = true,
+            &mut || do_save = true,
+            &mut || do_scaffold = true,
+        );
+        if do_load {
+            self.repo_load();
+        }
+        if do_save {
+            self.repo_save();
+        }
+        if do_scaffold {
+            self.repo_scaffold();
+        }
+    }
+
     fn sidebar_account(&mut self, ui: &mut Ui) {
         widgets::section_header(ui, "Account");
         ui.horizontal(|ui| {
@@ -1661,6 +2267,9 @@ impl IdeApp {
             (Command::Goto(Activity::Pulls), "View: Source Control / PRs".into(), "open pull request list".into()),
             (Command::Goto(Activity::Workflows), "View: Workflows".into(), "switch the sidebar to workflow runs".into()),
             (Command::Goto(Activity::Releases), "View: Releases & Tags".into(), "switch the sidebar to releases".into()),
+            (Command::Goto(Activity::Templates), "View: Templates".into(), "install CI / release / pages / site / community templates".into()),
+            (Command::Goto(Activity::Pages), "View: GitHub Pages".into(), "status, enable, build, generate landing site".into()),
+            (Command::Goto(Activity::Repo), "View: Repository & Community".into(), "repo settings + community health + scaffold".into()),
             (Command::Goto(Activity::Account), "View: Account & Modules".into(), "show identity + module grid".into()),
             (Command::ReloadTree, "Reload File Tree".into(), "re-fetch the tree (stale-while-revalidate)".into()),
             (Command::ClearCache, "Clear Cache & Reload".into(), "invalidate all SQLite TTL caches and refetch".into()),
@@ -1765,7 +2374,7 @@ impl IdeApp {
             egui::Frame::none()
                 .fill(theme::SIDEBAR)
                 .inner_margin(egui::Margin::same(8.0))
-                .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                .stroke(egui::Stroke::new(1.0_f32, theme::BORDER))
                 .rounding(6.0),
         )
         .show(ctx, |ui| {
@@ -1882,6 +2491,85 @@ impl eframe::App for IdeApp {
         self.palette(ctx);
 
         if self.selftest {
+            // Scripted, fully offline: canned repository + panel switches.
+            // The offline render assertions live in `selftest.rs` (run from
+            // main.rs before eframe starts); this loop exercises the real
+            // app frame flow end-to-end under xvfb.
+            match self.frames {
+                3 => {
+                    self.repo = Some(net::RepoInfo {
+                        owner: "octocrab".into(),
+                        name: "showcase".into(),
+                        default_branch: "main".into(),
+                    });
+                    self.repo_overview = Some(RepoOverview {
+                        description: "canned showcase repo (selftest)".into(),
+                        homepage: "https://example.test/showcase".into(),
+                        topics: vec!["rust".into(), "egui".into()],
+                        stars: 42,
+                        license: "MIT".into(),
+                        default_branch: "main".into(),
+                        html_url: "https://github.com/octocrab/showcase".into(),
+                    });
+                    self.prefill_panel_forms();
+                    self.status = "selftest: canned repository selected".into();
+                }
+                10 => self.activity = Activity::Templates,
+                15 => {
+                    // templates panel has been rendered for ~5 frames: the
+                    // canned repo must have prefilled the target field
+                    assert!(
+                        self.tpl_form.repo == "octocrab/showcase",
+                        "selftest: templates repo field not prefilled (got {:?})",
+                        self.tpl_form.repo
+                    );
+                }
+                20 => {
+                    self.activity = Activity::Pages;
+                    self.pages_info = Some(PagesStatus {
+                        enabled: true,
+                        html_url: "https://octocrab.github.io/showcase/".into(),
+                        build_type: "workflow".into(),
+                        status: "built".into(),
+                        build_status: "built".into(),
+                        error: None,
+                    });
+                }
+                25 => {
+                    assert!(
+                        self.pages_info.as_ref().is_some_and(|p| p.enabled),
+                        "selftest: canned pages info missing"
+                    );
+                }
+                30 => {
+                    self.activity = Activity::Repo;
+                    self.repo_edits = RepoEdits {
+                        description: "canned showcase repo (selftest)".into(),
+                        homepage: "https://example.test/showcase".into(),
+                        topics: "rust, egui".into(),
+                    };
+                    self.repo_community = Some(CommunityHealth {
+                        health_percent: 83,
+                        files: vec![
+                            ("README".into(), true),
+                            ("LICENSE".into(), true),
+                            ("CONTRIBUTING".into(), false),
+                            ("Code of Conduct".into(), false),
+                            ("Issue templates".into(), true),
+                            ("PR template".into(), false),
+                        ],
+                    });
+                }
+                35 => {
+                    assert!(
+                        self.repo_form.repo == "octocrab/showcase"
+                            && self.repo_community.is_some()
+                            && self.repo_edits.topics == "rust, egui",
+                        "selftest: repo panel state not prepared"
+                    );
+                }
+                _ => {}
+            }
             self.frames += 1;
             ctx.request_repaint();
             if self.frames >= 60 {

@@ -28,9 +28,15 @@ window.addEventListener('unhandledrejection', function (ev) {
     branch: '',
     limit: 25,
     currentRunId: null,
+    tplKey: null,          // template currently open in the install form
+    tplList: null,         // cached templates_list payload
+    tplModules: null,      // cached modules payload (gate badges)
+    pagesRepo: '',         // last repo used on the Pages tab
+    repoSpec: '',          // last repo loaded on the Repo tab
+    repoData: null,        // last repo_get payload
   };
 
-  var SECTIONS = ['overview', 'workflows', 'runs', 'releases', 'tags', 'repos', 'orgs', 'modules'];
+  var SECTIONS = ['overview', 'workflows', 'runs', 'releases', 'tags', 'repos', 'orgs', 'modules', 'templates', 'pages', 'repo'];
 
   // ------------------------------------------------------------- plumbing
 
@@ -131,6 +137,46 @@ window.addEventListener('unhandledrejection', function (ev) {
 
   // --------------------------------------------------------------- badges
 
+  function gateBadge(gate, modules) {
+    var rows = (modules && modules.modules) || [];
+    var st = 'unknown';
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].key === gate) { st = rows[i].enabled ? 'granted' : 'denied'; break; }
+    }
+    var icon = st === 'granted' ? '🔓' : st === 'denied' ? '🔒' : '❓';
+    return '<span class="badge ' + st + '">' + icon + ' ' + esc(gate) + '</span>';
+  }
+
+  function fileGlyph(ok) { return ok ? ['✓', 'ok'] : ['✗', 'bad']; }
+
+  function filerow(f) {
+    var g = fileGlyph(f.ok);
+    return '<div class="filerow">' +
+      '<span class="glyph ' + g[1] + '">' + g[0] + '</span>' +
+      '<span class="mono filerow-path">' + esc(f.path) + '</span>' +
+      (f.ok
+        ? (f.url ? '<a class="plainlink filerow-link" href="' + esc(f.url) + '" target="_blank" rel="noreferrer">view</a>' : '<span class="dim">written</span>')
+        : '<span class="badge failure">' + esc(f.error || 'failed') + '</span>') +
+    '</div>';
+  }
+
+  function renderInstallResult(r) {
+    var files = (r && r.files) || [];
+    var written = r.written != null ? r.written : files.filter(function (f) { return f.ok; }).length;
+    var total = r.total != null ? r.total : files.length;
+    return '<div class="card"><h3>' + esc(r.template || 'install') + ' → ' + esc(r.repo || '') + ' ' +
+      '<span class="badge ' + (r.ok ? 'success' : 'failure') + '">' + written + '/' + total + ' files</span></h3>' +
+      (files.length
+        ? files.map(filerow).join('')
+        : '<div class="dim">No files reported.</div>') +
+      '</div>';
+  }
+
+  function val(id) {
+    var el = document.getElementById(id);
+    return el ? el.value.trim() : '';
+  }
+
   function modBadge(st) {
     var cls = st === 'granted' ? 'granted' : st === 'denied' ? 'denied' : 'unknown';
     return '<span class="badge ' + cls + '">' + esc(st) + '</span>';
@@ -217,8 +263,11 @@ window.addEventListener('unhandledrejection', function (ev) {
           '<button class="btn" onclick="OC.show(\'runs\')">Runs</button>' +
           '<button class="btn" onclick="OC.show(\'releases\')">Releases</button>' +
           '<button class="btn" onclick="OC.show(\'tags\')">Tags</button>' +
+          '<button class="btn" onclick="OC.show(\'templates\')">Templates</button>' +
+          '<button class="btn" onclick="OC.show(\'pages\')">Pages</button>' +
+          '<button class="btn" onclick="OC.show(\'repo\')">Repo</button>' +
           '<button class="btn ghost" onclick="OC.show(\'modules\')">Modules</button>' +
-        '</div><p class="dim" style="margin-top:10px;font-size:12px">Set the target repository in the header bar to scope workflows, runs, releases and tags.</p></div>' +
+        '</div><p class="dim" style="margin-top:10px;font-size:12px">Set the target repository in the header bar to scope workflows, runs, releases, tags, templates, pages and repo settings.</p></div>' +
       '</div>';
     setContent(html);
   }
@@ -440,6 +489,158 @@ window.addEventListener('unhandledrejection', function (ev) {
     setContent(head + '<table class="data"><thead><tr><th>Module</th><th>State</th><th>Source</th><th>Evidence</th></tr></thead><tbody>' + body + '</tbody></table>');
   }
 
+  // ------------------------------------------------- templates / pages / repo
+
+  function tplByKey(key) {
+    var rows = (state.tplList && state.tplList.templates) || [];
+    for (var i = 0; i < rows.length; i++) if (rows[i].key === key) return rows[i];
+    return null;
+  }
+
+  function renderTemplates(data, modules) {
+    state.tplList = data;
+    state.tplModules = modules || state.tplModules;
+    var rows = (data && data.templates) || [];
+    var head = '<h2 class="section-title">Templates</h2>' +
+      '<p class="section-sub">' + rows.length + ' repo-tailored template(s) · rendered from live repository data · install needs the gate module</p>' +
+      '<div class="toolbar"><button class="btn small ghost" onclick="OC.loadTemplates()">⟳ Refresh</button>' +
+      '<span class="count">' + rows.length + ' template(s)</span></div>';
+    if (!rows.length) {
+      setContent(head + empty('🧩', 'No templates in the registry', 'octocrab-core::templates::TEMPLATES is empty — unexpected.'));
+      return;
+    }
+    var cards = rows.map(function (t) {
+      var locked = gateBadge(t.gate, state.tplModules).indexOf('badge denied') !== -1;
+      return '<div class="card tpl-card' + (locked ? ' locked' : '') + '" onclick="OC.tplForm(\'' + esc(t.key) + '\')" title="open install form">' +
+        '<h3>' + esc(t.name) + ' ' + gateBadge(t.gate, state.tplModules) + '</h3>' +
+        '<div class="dim" style="min-height:30px;margin-bottom:8px">' + esc(t.desc) + '</div>' +
+        '<div class="chips" style="margin-bottom:10px">' +
+          t.files.map(function (f) { return '<span class="chip mono">' + esc(f) + '</span>'; }).join('') +
+        '</div>' +
+        '<button class="btn small">⚙ Install…</button>' +
+      '</div>';
+    }).join('');
+    setContent(head + '<div class="cards">' + cards + '</div>');
+  }
+
+  function renderTplForm(t) {
+    var repo = state.pagesRepo || (state.target && state.target.owner ? state.target.owner + '/' + state.target.repo : '');
+    var lastRepo = state.repoSpec || repo;
+    var head = '<h2 class="section-title">' + esc(t.name) + '</h2>' +
+      '<p class="section-sub">' + esc(t.desc) + '</p>' +
+      '<div class="toolbar"><button class="btn small ghost" onclick="OC.loadTemplates()">← All templates</button>' +
+      gateBadge(t.gate, state.tplModules) +
+      '<span class="chips">' + t.files.map(function (f) { return '<span class="chip mono">' + esc(f) + '</span>'; }).join('') + '</span></div>' +
+      '<div class="card" style="max-width:760px"><h3>Install parameters</h3><div class="form-grid">' +
+        '<label>repo *</label><input type="text" id="tpl-repo" value="' + esc(lastRepo) + '" placeholder="owner/repo" spellcheck="false" />' +
+        '<label>project</label><input type="text" id="tpl-project" value="" placeholder="display name (default: repo name)" spellcheck="false" />' +
+        '<label>tagline</label><input type="text" id="tpl-tagline" value="" placeholder="default: built, packaged and shipped by the Octocrab Suite" spellcheck="false" />' +
+        '<label>bins</label><input type="text" id="tpl-bins" value="" placeholder="comma-separated binaries, e.g. octocrab-cli,gui" spellcheck="false" />' +
+        '<label>exclude</label><input type="text" id="tpl-exclude" value="" placeholder="workspace members to skip in CI, comma-separated" spellcheck="false" />' +
+      '</div>' +
+      '<button class="btn" id="tpl-install-btn" onclick="OC.tplInstall()">⚙ Install into repo</button>' +
+      '<span class="dim" style="margin-left:8px;font-size:11.5px">writes ' + t.files.length + ' file(s) via the Contents API</span></div>' +
+      '<div id="tpl-out" style="margin-top:12px"></div>';
+    setContent(head);
+  }
+
+  function s2(v, key) { return v && v[key] ? String(v[key]) : '—'; }
+
+  function renderPagesStatus(r) {
+    if (!r.enabled) {
+      return '<div class="card"><h3>GitHub Pages — not enabled ' +
+        '<span class="badge unknown">404</span></h3>' +
+        '<div class="dim">' + esc(r.reason || 'GitHub Pages is not enabled for this repository.') + '</div>' +
+        '<p class="dim" style="margin-top:8px;font-size:12px">Press <b>Enable</b> to turn Pages on with the modern <span class="mono">workflow</span> build type (needs <span class="mono">repo:admin</span>).</p></div>';
+    }
+    var url = r.html_url || (r.pages && r.pages.html_url) || '';
+    var source = r.pages && r.pages.source ? (s2(r.pages.source, 'branch') + ' · ' + s2(r.pages.source, 'path')) : '—';
+    return '<div class="card"><h3>GitHub Pages — enabled ' +
+      '<span class="badge granted">' + esc(r.build_type || 'workflow') + '</span></h3>' +
+      '<div class="kv">' +
+        '<div class="k">public URL</div><div>' + (url ? '<a class="plainlink" href="' + esc(url) + '" target="_blank" rel="noreferrer">' + esc(url) + '</a>' : '—') + '</div>' +
+        '<div class="k">build type</div><div class="mono">' + esc(r.build_type || '—') + '</div>' +
+        '<div class="k">build status</div><div>' + (r.status ? runStatusBadge(r.status, r.status) : '<span class="dim">deployed by the pages workflow</span>') + '</div>' +
+        '<div class="k">source</div><div class="mono">' + esc(source) + '</div>' +
+        '<div class="k">cname</div><div class="mono">' + esc(r.cname || '—') + '</div>' +
+        '<div class="k">https enforced</div><div>' + boolBadge(r.protected, 'yes', 'no') + '</div>' +
+      '</div></div>';
+  }
+
+  function renderPagesBuild(r) {
+    var bcls = r.status === 'built' ? 'success' : (r.status === 'errored' ? 'failure' : 'in_progress');
+    return '<div class="card"><h3>Pages build — requested ' +
+      '<span class="badge ' + bcls + '">' + esc(r.status || 'queued') + '</span></h3>' +
+      '<div class="kv">' +
+        '<div class="k">build status</div><div>' + esc(r.status || '—') + '</div>' +
+        '<div class="k">commit</div><div class="mono">' + shortSha(r.commit) + '</div>' +
+        '<div class="k">created</div><div>' + fmtDate(r.created_at) + '</div>' +
+        '<div class="k">updated</div><div>' + fmtDate(r.updated_at) + '</div>' +
+        '<div class="k">report URL</div><div class="mono">' + (r.url ? '<a class="plainlink" href="' + esc(r.url) + '" target="_blank" rel="noreferrer">' + esc(r.url) + '</a>' : '—') + '</div>' +
+        (r.error && r.error.message ? '<div class="k">error</div><div><span class="badge failure">' + esc(r.error.message) + '</span></div>' : '') +
+      '</div></div>';
+  }
+
+  function renderRepo(r) {
+    state.repoData = r;
+    var c = r.community || null;
+    var files = c && c.files ? c.files : {};
+    var checks = [
+      ['README', files.readme],
+      ['License', files.license],
+      ['CONTRIBUTING', files.contributing],
+      ['Code of Conduct', files.code_of_conduct],
+      ['Issue templates', files.issue_template],
+      ['PR template', files.pull_request_template],
+    ];
+    var checklist = checks.map(function (ck) {
+      var g = ck[1] ? ['✓', 'ok'] : ['✗', 'bad'];
+      return '<div class="filerow">' +
+        '<span class="glyph ' + g[1] + '">' + g[0] + '</span>' +
+        '<span class="filerow-path">' + esc(ck[0]) + '</span>' +
+        (ck[1] && ck[1].html_url ? '<a class="plainlink filerow-link" href="' + esc(ck[1].html_url) + '" target="_blank" rel="noreferrer">view</a>' : '<span class="dim">missing</span>') +
+      '</div>';
+    }).join('');
+    var topics = (r.topics || []).join(', ');
+    setContent(
+      '<h2 class="section-title">Repository — ' + esc(r.full_name || (r.owner + '/' + r.repo)) + '</h2>' +
+      '<p class="section-sub">profile · settings · community health — edits need <span class="mono">repo:admin</span>, scaffolding needs <span class="mono">repo:write</span></p>' +
+      '<div class="toolbar">' +
+        '<label>repo</label><input type="text" id="repo-input" value="' + esc(state.repoSpec) + '" placeholder="owner/repo" spellcheck="false" style="width:260px" />' +
+        '<button class="btn" id="repo-load-btn" onclick="OC.repoLoad()">Load</button>' +
+        '<span class="count">' + esc(state.repoSpec) + '</span>' +
+      '</div>' +
+      '<div class="cards">' +
+        '<div class="card"><h3>Profile</h3><div class="kv">' +
+          '<div class="k">full name</div><div>' + (r.html_url ? '<a class="plainlink" href="' + esc(r.html_url) + '" target="_blank" rel="noreferrer">' + esc(r.full_name) + '</a>' : esc(r.full_name)) + '</div>' +
+          '<div class="k">default branch</div><div class="mono">' + esc(r.default_branch || '—') + '</div>' +
+          '<div class="k">license</div><div class="mono">' + esc(r.license || '—') + '</div>' +
+          '<div class="k">stars</div><div>★ ' + esc(r.stars != null ? r.stars : '—') + '</div>' +
+          '<div class="k">open issues</div><div>' + esc(r.open_issues != null ? r.open_issues : '—') + '</div>' +
+          '<div class="k">pages</div><div>' + boolBadge(r.has_pages, 'enabled', 'off') + '</div>' +
+          '<div class="k">visibility</div><div>' + (r.private ? '<span class="badge queued">private</span>' : '<span class="badge granted">public</span>') + (r.fork ? ' <span class="badge unknown">fork</span>' : '') + '</div>' +
+        '</div></div>' +
+
+        '<div class="card"><h3>Settings <span class="badge info">repo:admin</span></h3><div class="form-grid">' +
+          '<label>description</label><input type="text" id="repo-desc" value="' + esc(r.description || '') + '" placeholder="short description" spellcheck="false" />' +
+          '<label>homepage</label><input type="text" id="repo-home" value="' + esc(r.homepage || '') + '" placeholder="https://…" spellcheck="false" />' +
+          '<label>topics</label><input type="text" id="repo-topics" value="' + esc(topics) + '" placeholder="comma-separated topics (blank = leave untouched)" spellcheck="false" />' +
+        '</div>' +
+        '<button class="btn" id="repo-save-btn" onclick="OC.repoSave()">💾 Save settings</button>' +
+        '<div id="repo-settings-out" style="margin-top:10px"></div></div>' +
+
+        '<div class="card"><h3>Community health ' +
+          (c && c.health_percentage != null ? '<span class="badge ' + (c.health_percentage >= 80 ? 'success' : c.health_percentage >= 50 ? 'queued' : 'failure') + '">' + esc(c.health_percentage) + '%</span>' : '<span class="badge unknown">no profile</span>') +
+        '</h3>' +
+          (c ? checklist : '<div class="dim">No community profile (repo is private or empty).</div>') +
+          '<div class="form-grid" style="margin-top:12px">' +
+            '<label>contact</label><input type="text" id="repo-contact" value="" placeholder="security contact for SECURITY.md / CoC (optional)" spellcheck="false" />' +
+          '</div>' +
+          '<button class="btn" id="repo-scaffold-btn" onclick="OC.repoScaffold()">🧩 Scaffold community files</button>' +
+          '<div id="repo-scaffold-out" style="margin-top:10px"></div></div>' +
+      '</div>');
+  }
+
   // ------------------------------------------------------------ data loads
 
   function loadAuthFooter() {
@@ -524,6 +725,22 @@ window.addEventListener('unhandledrejection', function (ev) {
         .then(renderModules)
         .catch(function (e) { setContent(errorBox(e, 'OC.loadModules')); });
     },
+    templates: function () {
+      setContent(setLoading('Loading template registry…'));
+      return Promise.all([inv('templates_list'), inv('modules').catch(function () { return null; })])
+        .then(function (rs) { renderTemplates(rs[0], rs[1]); })
+        .catch(function (e) { setContent(errorBox(e, 'OC.loadTemplates')); });
+    },
+    pages: function () {
+      renderPagesShell();
+      if (state.pagesRepo || (state.target && state.target.owner)) OC.pagesStatus();
+      return Promise.resolve();
+    },
+    repo: function () {
+      renderRepoShell();
+      if (state.repoSpec || (state.target && state.target.owner)) OC.repoLoad();
+      return Promise.resolve();
+    },
   };
 
   function show(section) {
@@ -544,7 +761,7 @@ window.addEventListener('unhandledrejection', function (ev) {
     var l = document.getElementById('limit-sel');
     state.branch = b ? b.value.trim() : '';
     state.limit = l ? parseInt(l.value, 10) || 25 : 25;
-    loadRuns();
+    loaders.runs();
   }
 
   function setTarget(fullName) {
@@ -592,6 +809,233 @@ window.addEventListener('unhandledrejection', function (ev) {
     inv('org_details', { org: login })
       .then(renderOrgDetails)
       .catch(function (e) { setContent(errorBox(e, 'OC.loadOrgs')); });
+  }
+
+  // --------------------------------------------- templates · pages · repo actions
+
+  function tplForm(key) {
+    var t = tplByKey(key);
+    if (!t) { toast('unknown template ' + key, 'err'); return; }
+    state.tplKey = key;
+    renderTplForm(t);
+  }
+
+  function tplInstall() {
+    var t = tplByKey(state.tplKey);
+    var btn = document.getElementById('tpl-install-btn');
+    var out = document.getElementById('tpl-out');
+    if (!t || !btn || !out) return;
+    var repo = val('tpl-repo');
+    if (!/^[^\/\s]+\/[^\/\s]+$/.test(repo)) { toast('enter a target as owner/repo first', 'err'); return; }
+    state.repoSpec = repo;
+    var args = { key: t.key, repo: repo };
+    var project = val('tpl-project'), tagline = val('tpl-tagline'), bins = val('tpl-bins'), exclude = val('tpl-exclude');
+    if (project) args.project = project;
+    if (tagline) args.tagline = tagline;
+    if (bins) args.bins = bins;
+    if (exclude) args.exclude = exclude;
+    btn.disabled = true;
+    btn.textContent = 'Installing…';
+    out.innerHTML = setLoading('Rendering ' + esc(t.name) + ' & writing ' + t.files.length + ' file(s)…');
+    inv('template_install', args)
+      .then(function (r) {
+        out.innerHTML = renderInstallResult(r);
+        if (r.ok) toast('template ' + t.key + ' installed — ' + r.written + '/' + r.total + ' file(s)', 'ok');
+        else toast(r.error || ('install incomplete: ' + r.written + '/' + r.total), 'err');
+      })
+      .catch(function (e) { out.innerHTML = errorBox(e, 'OC.tplInstall'); })
+      .then(function () {
+        btn.disabled = false;
+        btn.textContent = '⚙ Install into repo';
+      });
+  }
+
+  function renderPagesShell() {
+    var repo = state.pagesRepo || (state.target && state.target.owner ? state.target.owner + '/' + state.target.repo : '');
+    setContent(
+      '<h2 class="section-title">GitHub Pages</h2>' +
+      '<p class="section-sub">status · enable (needs <span class="mono">repo:admin</span>) · build · landing-site generator</p>' +
+      '<div class="toolbar">' +
+        '<label>repo</label><input type="text" id="pages-repo" value="' + esc(repo) + '" placeholder="owner/repo" spellcheck="false" style="width:260px" />' +
+        '<button class="btn" id="pages-status-btn" onclick="OC.pagesStatus()">Status</button>' +
+        '<button class="btn" id="pages-enable-btn" onclick="OC.pagesEnable()">Enable</button>' +
+        '<button class="btn" id="pages-build-btn" onclick="OC.pagesBuild()">Build now</button>' +
+        '<button class="btn ghost" id="pages-site-btn" onclick="OC.pagesSite()">🌐 Generate site</button>' +
+      '</div>' +
+      '<div id="pages-out">' + empty('🌐', 'No status yet', 'Press Status to fetch the Pages configuration.') + '</div>');
+  }
+
+  function pagesRepoArg() {
+    var repo = val('pages-repo');
+    if (!/^[^\/\s]+\/[^\/\s]+$/.test(repo)) { toast('enter a target as owner/repo first', 'err'); return null; }
+    state.pagesRepo = repo;
+    return repo;
+  }
+
+  function pagesBusy(html) {
+    var o = document.getElementById('pages-out');
+    if (o) o.innerHTML = setLoading(html);
+  }
+
+  function pagesShow(html) {
+    var o = document.getElementById('pages-out');
+    if (o) o.innerHTML = html;
+  }
+
+  function pagesButton(id, label, disabled) {
+    var b = document.getElementById(id);
+    if (b) { b.disabled = !!disabled; b.textContent = label; }
+  }
+
+  function pagesStatus() {
+    var repo = pagesRepoArg();
+    if (!repo) return;
+    pagesBusy('Fetching Pages status…');
+    inv('pages_info', { repo: repo })
+      .then(function (r) { pagesShow(renderPagesStatus(r)); })
+      .catch(function (e) { pagesShow(errorBox(e, 'OC.pagesStatus')); });
+  }
+
+  function pagesEnable() {
+    var repo = pagesRepoArg();
+    if (!repo) return;
+    pagesButton('pages-enable-btn', 'Enabling…', true);
+    pagesBusy('Enabling Pages (build_type: workflow)…');
+    inv('pages_enable', { repo: repo })
+      .then(function (r) {
+        pagesShow('<div class="card"><h3>Pages enabled <span class="badge granted">ok</span></h3>' +
+          '<div class="kv">' +
+            '<div class="k">build type</div><div class="mono">' + esc(r.build_type || 'workflow') + '</div>' +
+            '<div class="k">public URL</div><div>' + (r.html_url ? '<a class="plainlink" href="' + esc(r.html_url) + '" target="_blank" rel="noreferrer">' + esc(r.html_url) + '</a>' : '—') + '</div>' +
+          '</div></div>');
+        toast('Pages enabled on ' + repo, 'ok');
+        setTimeout(function () { if (state.section === 'pages') pagesStatus(); }, 900);
+      })
+      .catch(function (e) {
+        pagesShow(errorBox(e, 'OC.pagesEnable'));
+      })
+      .then(function () {
+        pagesButton('pages-enable-btn', 'Enable', false);
+      });
+  }
+
+  function pagesBuild() {
+    var repo = pagesRepoArg();
+    if (!repo) return;
+    pagesButton('pages-build-btn', 'Building…', true);
+    pagesBusy('Requesting a Pages build…');
+    inv('pages_build', { repo: repo })
+      .then(function (r) {
+        pagesShow(renderPagesBuild(r));
+        pagesButton('pages-build-btn', 'Build now', false);
+      })
+      .catch(function (e) {
+        pagesShow(errorBox(e, 'OC.pagesBuild'));
+        pagesButton('pages-build-btn', 'Build now', false);
+      });
+  }
+
+  function pagesSite() {
+    var repo = pagesRepoArg();
+    if (!repo) return;
+    pagesButton('pages-site-btn', 'Generating…', true);
+    pagesBusy('Rendering the landing site from live repo data…');
+    inv('site_generate', { repo: repo })
+      .then(function (r) {
+        pagesShow(renderInstallResult(r) +
+          '<p class="dim" style="margin-top:8px;font-size:12px">Next: run the <span class="mono">pages</span> workflow (or press Build now for legacy source builds) to deploy <span class="mono">site/</span>.</p>');
+        if (r.ok) toast('site generated — ' + r.written + '/' + r.total + ' file(s)', 'ok');
+        pagesButton('pages-site-btn', '🌐 Generate site', false);
+      })
+      .catch(function (e) {
+        pagesShow(errorBox(e, 'OC.pagesSite'));
+        pagesButton('pages-site-btn', '🌐 Generate site', false);
+      });
+  }
+
+  function renderRepoShell() {
+    var spec = state.repoSpec || (state.target && state.target.owner ? state.target.owner + '/' + state.target.repo : '');
+    setContent(
+      '<h2 class="section-title">Repository</h2>' +
+      '<p class="section-sub">profile · settings · community health — edits need <span class="mono">repo:admin</span>, scaffolding needs <span class="mono">repo:write</span></p>' +
+      '<div class="toolbar">' +
+        '<label>repo</label><input type="text" id="repo-input" value="' + esc(spec) + '" placeholder="owner/repo" spellcheck="false" style="width:260px" />' +
+        '<button class="btn" id="repo-load-btn" onclick="OC.repoLoad()">Load</button>' +
+      '</div>' +
+      '<div id="repo-out">' + empty('🗃', 'No repository loaded', 'Enter owner/repo and press Load.') + '</div>');
+  }
+
+  function repoLoad() {
+    var spec = val('repo-input');
+    if (!/^[^\/\s]+\/[^\/\s]+$/.test(spec)) { toast('enter a target as owner/repo first', 'err'); return; }
+    state.repoSpec = spec;
+    var out = document.getElementById('repo-out');
+    if (out) out.innerHTML = setLoading('Fetching repository + community profile…');
+    var section = state.section;
+    inv('repo_get', { repo: spec })
+      .then(function (r) {
+        if (state.section !== section) return; // user navigated away mid-flight
+        renderRepo(r);
+      })
+      .catch(function (e) {
+        var o = document.getElementById('repo-out');
+        if (o && state.section === section) o.innerHTML = errorBox(e, 'OC.repoLoad');
+      });
+  }
+
+  function repoSave() {
+    if (!state.repoData || !state.repoSpec) { toast('load a repository first', 'err'); return; }
+    var btn = document.getElementById('repo-save-btn');
+    var out = document.getElementById('repo-settings-out');
+    if (!btn || !out) return;
+    var args = {
+      repo: state.repoSpec,
+      description: val('repo-desc'),
+      homepage: val('repo-home'),
+      topics: val('repo-topics'),
+    };
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    out.innerHTML = setLoading('Patching repository settings…');
+    inv('repo_edit', args)
+      .then(function (r) {
+        out.innerHTML = '<div class="card"><h3>Settings saved <span class="badge granted">ok</span></h3><div class="kv">' +
+          '<div class="k">description</div><div>' + esc(r.description || '—') + '</div>' +
+          '<div class="k">homepage</div><div class="mono">' + esc(r.homepage || '—') + '</div>' +
+          '<div class="k">topics</div><div class="chips">' + (r.topics || []).map(function (t) { return '<span class="chip on">' + esc(t) + '</span>'; }).join('') + '</div>' +
+        '</div></div>';
+        toast('repository settings saved', 'ok');
+        setTimeout(function () { if (state.section === 'repo' && state.repoSpec) repoLoad(); }, 1200);
+      })
+      .catch(function (e) { out.innerHTML = errorBox(e, 'OC.repoSave'); })
+      .then(function () {
+        btn.disabled = false;
+        btn.textContent = '💾 Save settings';
+      });
+  }
+
+  function repoScaffold() {
+    if (!state.repoSpec) { toast('load a repository first', 'err'); return; }
+    var btn = document.getElementById('repo-scaffold-btn');
+    var out = document.getElementById('repo-scaffold-out');
+    if (!btn || !out) return;
+    var args = { repo: state.repoSpec };
+    var contact = val('repo-contact');
+    if (contact) args.contact = contact;
+    btn.disabled = true;
+    btn.textContent = 'Scaffolding…';
+    out.innerHTML = setLoading('Rendering the community health kit…');
+    inv('community_scaffold', args)
+      .then(function (r) {
+        out.innerHTML = renderInstallResult(r);
+        if (r.ok) toast('community files scaffolded — ' + r.written + '/' + r.total, 'ok');
+        setTimeout(function () { if (state.section === 'repo' && state.repoSpec) repoLoad(); }, 1500);
+      })
+      .catch(function (e) { out.innerHTML = errorBox(e, 'OC.repoScaffold'); })
+      .then(function () {
+        btn.disabled = false;
+        btn.textContent = '🧩 Scaffold community files';
+      });
   }
 
   // --------------------------------------------------------------- drawer
@@ -719,6 +1163,16 @@ window.addEventListener('unhandledrejection', function (ev) {
     openRun: openRun,
     reopenRun: reopenRun,
     orgDetails: orgDetails,
+    loadTemplates: function () { return loaders.templates(); },
+    tplForm: tplForm,
+    tplInstall: tplInstall,
+    pagesStatus: pagesStatus,
+    pagesEnable: pagesEnable,
+    pagesBuild: pagesBuild,
+    pagesSite: pagesSite,
+    repoLoad: repoLoad,
+    repoSave: repoSave,
+    repoScaffold: repoScaffold,
   };
 
   if (document.readyState === 'loading') {

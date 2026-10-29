@@ -4,6 +4,8 @@ pub mod issues;
 pub mod misc;
 pub mod modules;
 pub mod orgs;
+pub mod pages_cmd;
 pub mod repos;
 pub mod releases;
+pub mod templates;
 pub mod workflows;

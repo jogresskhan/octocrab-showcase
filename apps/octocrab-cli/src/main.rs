@@ -121,6 +121,94 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Data-driven repo templates: multi-OS CI, packaging/release, pages,
+    /// community kit, README scaffold
+    Templates {
+        #[command(subcommand)]
+        cmd: TemplatesCmd,
+    },
+    /// GitHub Pages: enable, status, builds, data-driven site generator
+    Pages {
+        #[command(subcommand)]
+        cmd: PagesCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum TemplatesCmd {
+    /// List available templates
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Install a template into OWNER/REPO (rendered from live repo data)
+    Install {
+        /// template key (see templates list)
+        key: String,
+        /// OWNER/REPO
+        repo: String,
+        /// project display name (default: repo name)
+        #[arg(long)]
+        project: Option<String>,
+        /// description override (default: live repo description)
+        #[arg(long)]
+        desc: Option<String>,
+        /// site/README tagline
+        #[arg(long)]
+        tagline: Option<String>,
+        /// binaries to package, comma-separated (release template)
+        #[arg(long)]
+        bins: Option<String>,
+        /// crates to exclude from CI, comma-separated (e.g. gui crates)
+        #[arg(long)]
+        exclude: Option<String>,
+        /// license SPDX id (default: from repo)
+        #[arg(long)]
+        license: Option<String>,
+        /// contact for CoC / security reports
+        #[arg(long)]
+        contact: Option<String>,
+        #[arg(long)]
+        branch: Option<String>,
+        #[arg(long)]
+        message: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum PagesCmd {
+    /// Show Pages status for OWNER/REPO
+    Info {
+        /// OWNER/REPO
+        repo: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Enable Pages with the workflow build type
+    Enable {
+        /// OWNER/REPO
+        repo: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Request a Pages build and show its status
+    Build {
+        /// OWNER/REPO
+        repo: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Generate a data-driven landing site from live repo data into site/
+    Site {
+        /// OWNER/REPO
+        repo: String,
+        #[arg(long)]
+        tagline: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -217,13 +305,50 @@ enum ReposCmd {
         #[arg(long)]
         branch: Option<String>,
     },
-    /// Print a file's contents
+    /// Read a file's contents
     File {
         /// OWNER/REPO
         repo: String,
         path: String,
         #[arg(long)]
         ref_: Option<String>,
+    },
+    /// Edit repo-page settings (description, homepage, topics, feature flags)
+    Edit {
+        /// OWNER/REPO
+        repo: String,
+        #[arg(long)]
+        desc: Option<String>,
+        #[arg(long)]
+        homepage: Option<String>,
+        /// comma-separated topic list
+        #[arg(long)]
+        topics: Option<String>,
+        #[arg(long, action = clap::ArgAction::SetTrue)]
+        issues: Option<bool>,
+        #[arg(long, action = clap::ArgAction::SetTrue)]
+        wiki: Option<bool>,
+        #[arg(long, action = clap::ArgAction::SetTrue)]
+        discussions: Option<bool>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Community health / contribution settings status
+    Community {
+        /// OWNER/REPO
+        repo: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Scaffold the community-health kit (contributing, CoC, templates)
+    Scaffold {
+        /// OWNER/REPO
+        repo: String,
+        /// contact for CoC / security reports
+        #[arg(long)]
+        contact: Option<String>,
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -313,6 +438,14 @@ enum WorkflowsCmd {
         ref_: String,
         #[arg(long = "input")]
         inputs: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Deep run trace: every job + step with timestamps and durations
+    Trace {
+        /// OWNER/REPO
+        repo: String,
+        run_id: u64,
         #[arg(long)]
         json: bool,
     },
@@ -439,7 +572,7 @@ enum DbCmd {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    use cmd::{achievements as ach, auth, issues, misc, modules, orgs, repos, releases, workflows};
+    use cmd::{achievements as ach, auth, issues, misc, modules, orgs, pages_cmd, repos, releases, templates, workflows};
     match cli.cmd {
         Cmd::Auth { cmd } => match cmd {
             AuthCmd::Set { label, stdin, file } => auth::set(label, stdin, file).await,
@@ -464,6 +597,13 @@ async fn main() -> Result<()> {
                 repos::upload(repo, path, file, message, branch).await
             }
             ReposCmd::File { repo, path, ref_ } => repos::file(repo, path, ref_).await,
+            ReposCmd::Edit { repo, desc, homepage, topics, issues, wiki, discussions, json } => {
+                repos::edit(repo, desc, homepage, topics, issues, wiki, discussions, json).await
+            }
+            ReposCmd::Community { repo, json } => repos::community(repo, json).await,
+            ReposCmd::Scaffold { repo, contact, json } => {
+                repos::scaffold(repo, contact, json).await
+            }
         },
         Cmd::Issues { cmd } => match cmd {
             IssuesCmd::List { repo, state, limit, json } => {
@@ -485,6 +625,9 @@ async fn main() -> Result<()> {
             }
             WorkflowsCmd::Run { repo, run_id, json } => {
                 workflows::run_view(repo, run_id, json).await
+            }
+            WorkflowsCmd::Trace { repo, run_id, json } => {
+                workflows::trace(repo, run_id, json).await
             }
             WorkflowsCmd::Trigger { repo, workflow, ref_, inputs, json } => {
                 workflows::trigger(repo, workflow, ref_, inputs, json).await
@@ -527,6 +670,44 @@ async fn main() -> Result<()> {
             DbCmd::Info => misc::db_info(false).await,
         },
         Cmd::Api { route, method, data, json } => misc::api_call(route, method, data, json).await,
+        Cmd::Templates { cmd } => match cmd {
+            TemplatesCmd::List { json } => templates::list(json).await,
+            TemplatesCmd::Install {
+                key,
+                repo,
+                project,
+                desc,
+                tagline,
+                bins,
+                exclude,
+                license,
+                contact,
+                branch,
+                message,
+                json,
+            } => {
+                let args = templates::InstallArgs {
+                    project,
+                    desc,
+                    tagline,
+                    bins,
+                    exclude,
+                    license,
+                    contact,
+                    branch,
+                    message,
+                };
+                templates::install(key, repo, args, json).await
+            }
+        },
+        Cmd::Pages { cmd } => match cmd {
+            PagesCmd::Info { repo, json } => pages_cmd::info(repo, json).await,
+            PagesCmd::Enable { repo, json } => pages_cmd::enable(repo, json).await,
+            PagesCmd::Build { repo, json } => pages_cmd::build(repo, json).await,
+            PagesCmd::Site { repo, tagline, json } => {
+                pages_cmd::site(repo, tagline, json).await
+            }
+        },
         Cmd::Status { json } => misc::status(json).await,
     }
 }

@@ -3,9 +3,9 @@
 //! runtime (`block_on` inside `Promise::spawn_blocking` closures) so the UI
 //! thread never touches the network.
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use octocrab::Octocrab;
-use octocrab_ui_egui::{JobRow, ReleaseRow, RunRow, SearchHit, StepRow, TagRow, TreeItem, TreeKind};
+use octocrab_ui_egui::{CommunityHealth, JobRow, PagesStatus, ReleaseRow, RepoOverview, RunRow, SearchHit, StepRow, TagRow, TreeItem, TreeKind};
 use std::sync::{Arc, OnceLock};
 
 /// The process-wide tokio runtime (multi-thread, all features enabled).
@@ -448,6 +448,233 @@ pub async fn dispatch_workflow(
     } else {
         Err(anyhow!("dispatch returned HTTP {status}"))
     }
+}
+
+// ------------------------------------------------- templates / pages / repo
+
+/// Push one file through the Contents API (sha-probed update-or-create).
+pub async fn put_file(
+    octo: &Arc<Octocrab>,
+    owner: &str,
+    repo: &str,
+    path: &str,
+    content: &str,
+    message: &str,
+    branch: Option<&str>,
+) -> Result<String> {
+    with_timeout(
+        40,
+        octocrab_core::contents::put_file(octo, owner, repo, path, content, message, branch),
+    )
+    .await
+}
+
+/// Render the `site` template from *live* repo data: `repos().get()` for
+/// project/description/license plus the latest release tag as the tagline.
+pub async fn site_files(octo: &Arc<Octocrab>, owner: &str, repo: &str) -> Result<Vec<(String, String)>> {
+    let rh = octo.repos(owner, repo);
+    let repo_model = with_timeout(15, rh.get()).await?;
+    let tag = with_timeout(15, rh.releases().list().per_page(1).send())
+        .await
+        .ok()
+        .and_then(|page| page.items.first().map(|r| r.tag_name.clone()))
+        .unwrap_or_default();
+    let params = octocrab_core::templates::TemplateParams {
+        project: repo_model.name.clone(),
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+        description: repo_model.description.clone().unwrap_or_default(),
+        tagline: if tag.is_empty() {
+            "built with the Octocrab Suite".to_string()
+        } else {
+            format!("latest release {tag}")
+        },
+        license: repo_model
+            .license
+            .map(|l| l.name)
+            .unwrap_or_else(|| "MIT".to_string()),
+        ..Default::default()
+    };
+    octocrab_core::templates::render("site", &params)
+}
+
+fn json_str(v: &serde_json::Value, key: &str) -> String {
+    v.get(key)
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .to_string()
+}
+
+/// Digest pages info + latest build into a `PagesStatus`.
+fn pages_status_from(info: serde_json::Value, build: Option<serde_json::Value>) -> PagesStatus {
+    PagesStatus {
+        enabled: true,
+        html_url: json_str(&info, "html_url"),
+        build_type: json_str(&info, "build_type"),
+        status: json_str(&info, "status"),
+        build_status: build
+            .as_ref()
+            .map(|b| json_str(b, "status"))
+            .unwrap_or_default(),
+        error: None,
+    }
+}
+
+/// Pages info (404 → `enabled: false` with the reason set).
+pub async fn pages_status(octo: &Arc<Octocrab>, owner: &str, repo: &str) -> Result<PagesStatus> {
+    match octocrab_core::pages::info(octo, owner, repo).await {
+        Err(e) => Ok(PagesStatus {
+            enabled: false,
+            error: Some(e.to_string()),
+            ..Default::default()
+        }),
+        Ok(info) => {
+            let build = octocrab_core::pages::latest_build(octo, owner, repo)
+                .await
+                .ok();
+            Ok(pages_status_from(info, build))
+        }
+    }
+}
+
+/// Enable Pages (workflow build type), then re-read the status.
+pub async fn pages_enable(octo: &Arc<Octocrab>, owner: &str, repo: &str) -> Result<PagesStatus> {
+    octocrab_core::pages::enable(octo, owner, repo).await?;
+    pages_status(octo, owner, repo).await
+}
+
+/// Request a Pages build, then report the latest build status.
+pub async fn pages_build(octo: &Arc<Octocrab>, owner: &str, repo: &str) -> Result<PagesStatus> {
+    octocrab_core::pages::request_build(octo, owner, repo).await?;
+    let build = octocrab_core::pages::latest_build(octo, owner, repo).await.ok();
+    let build_status = || {
+        build
+            .as_ref()
+            .map(|b| json_str(b, "status"))
+            .unwrap_or_default()
+    };
+    let mut status = match octocrab_core::pages::info(octo, owner, repo).await {
+        Ok(info) => pages_status_from(info, build.clone()),
+        Err(_) => PagesStatus {
+            enabled: true, // request_build succeeded → Pages exists
+            ..Default::default()
+        },
+    };
+    if status.build_status.is_empty() {
+        status.build_status = build_status();
+    }
+    Ok(status)
+}
+
+/// Digest of GET /repos/{o}/{r} for the Repo panel.
+pub async fn repo_overview(octo: &Arc<Octocrab>, owner: &str, repo: &str) -> Result<RepoOverview> {
+    let (status, v) = octocrab_core::raw::raw_get(octo, &format!("/repos/{owner}/{repo}")).await?;
+    if status >= 400 {
+        bail!("repo lookup failed: HTTP {status}");
+    }
+    Ok(RepoOverview {
+        description: json_str(&v, "description"),
+        homepage: json_str(&v, "homepage"),
+        topics: v
+            .get("topics")
+            .and_then(serde_json::Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(|t| t.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        stars: v
+            .get("stargazers_count")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        license: v
+            .get("license")
+            .and_then(|l| l.get("name"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("(none)")
+            .to_string(),
+        default_branch: v
+            .get("default_branch")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("main")
+            .to_string(),
+        html_url: json_str(&v, "html_url"),
+    })
+}
+
+/// Community-health checklist keys in fixed display order.
+const COMMUNITY_FILES: [(&str, &str); 6] = [
+    ("readme", "README"),
+    ("license", "LICENSE"),
+    ("contributing", "CONTRIBUTING"),
+    ("code_of_conduct", "Code of Conduct"),
+    ("issue_template", "Issue templates"),
+    ("pull_request_template", "PR template"),
+];
+
+/// Digest of GET /repos/{o}/{r}/community/profile.
+pub async fn community_profile(octo: &Arc<Octocrab>, owner: &str, repo: &str) -> Result<CommunityHealth> {
+    let (status, v) =
+        octocrab_core::raw::raw_get(octo, &format!("/repos/{owner}/{repo}/community/profile")).await?;
+    if status >= 400 {
+        bail!("community profile: HTTP {status}");
+    }
+    let files_obj = v.get("files").cloned().unwrap_or(serde_json::Value::Null);
+    Ok(CommunityHealth {
+        health_percent: v
+            .get("health_percentage")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        files: COMMUNITY_FILES
+            .iter()
+            .map(|(key, label)| {
+                let present = files_obj
+                    .get(*key)
+                    .map(|f| !f.is_null())
+                    .unwrap_or(false);
+                (label.to_string(), present)
+            })
+            .collect(),
+    })
+}
+
+/// PATCH /repos/{o}/{r} (description, homepage) + PUT /repos/{o}/{r}/topics.
+pub async fn save_repo_settings(
+    octo: &Arc<Octocrab>,
+    owner: &str,
+    repo: &str,
+    description: &str,
+    homepage: &str,
+    topics: &[String],
+) -> Result<String> {
+    let (status, body) = octocrab_core::raw::raw_send(
+        octo,
+        "PATCH",
+        &format!("/repos/{owner}/{repo}"),
+        Some(serde_json::json!({
+            "description": description,
+            "homepage": homepage,
+        })),
+    )
+    .await?;
+    if status >= 400 {
+        bail!("PATCH /repos failed: HTTP {status} — {}", json_str(&body, "message"));
+    }
+    let (status, body) = octocrab_core::raw::raw_send(
+        octo,
+        "PUT",
+        &format!("/repos/{owner}/{repo}/topics"),
+        Some(serde_json::json!({ "names": topics })),
+    )
+    .await?;
+    if status >= 400 {
+        bail!("PUT /topics failed: HTTP {status} — {}", json_str(&body, "message"));
+    }
+    Ok(format!(
+        "settings saved · {} topic(s) updated",
+        topics.len()
+    ))
 }
 
 // --------------------------------------------------------- local walkdir

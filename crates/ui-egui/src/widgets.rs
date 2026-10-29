@@ -44,7 +44,7 @@ pub fn section_header(ui: &mut Ui, text: &str) {
 pub fn locked_panel(ui: &mut Ui, module_key: &str, desc: &str) {
     egui::Frame::none()
         .fill(Color32::from_rgb(0x2a, 0x22, 0x1c))
-        .stroke(egui::Stroke::new(1.0, theme::YELLOW.gamma_multiply(0.45)))
+        .stroke(egui::Stroke::new(1.0_f32, theme::YELLOW.gamma_multiply(0.45)))
         .inner_margin(egui::Margin::same(10.0))
         .rounding(4.0)
         .show(ui, |ui| {
@@ -59,4 +59,31 @@ pub fn locked_panel(ui: &mut Ui, module_key: &str, desc: &str) {
                     .size(11.0),
             );
         });
+}
+
+/// Parse an `OWNER/REPO` text field into `(owner, repo)`.
+pub fn parse_repo(s: &str) -> Option<(String, String)> {
+    let (o, r) = s.trim().split_once('/')?;
+    let (o, r) = (o.trim(), r.trim());
+    if o.is_empty() || r.is_empty() {
+        None
+    } else {
+        Some((o.to_string(), r.to_string()))
+    }
+}
+
+/// Parse a comma-separated list field ("a, b, c") into trimmed, non-empty items.
+pub fn parse_list(s: &str) -> Vec<String> {
+    s.split(',')
+        .map(|x| x.trim().to_string())
+        .filter(|x| !x.is_empty())
+        .collect()
+}
+
+/// A dim key + coloured value row ("license:  MIT").
+pub fn kv(ui: &mut Ui, key: &str, value: &str, value_color: Color32) {
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(format!("{key}:")).color(theme::DIM).size(11.0));
+        ui.label(RichText::new(value.to_string()).color(value_color).size(11.5));
+    });
 }

@@ -14,8 +14,12 @@
 pub mod cache;
 pub mod caps;
 pub mod client;
+pub mod contents;
 pub mod crypto;
 pub mod db;
+pub mod pages;
+pub mod raw;
+pub mod templates;
 
 /// Tauri-style application identifier (also the data directory name).
 pub const APP_ID: &str = "com.octocrab.suite";

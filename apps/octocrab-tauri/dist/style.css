@@ -388,6 +388,47 @@ pre.body {
   overflow-y: auto;
 }
 
+/* --------------------------------------------------- templates/pages/repo */
+
+.tpl-card { cursor: pointer; transition: border-color .12s, transform .12s; }
+.tpl-card:hover { border-color: var(--accent); }
+.tpl-card.locked { opacity: 0.72; }
+.tpl-card.locked h3 .badge { filter: saturate(0.7); }
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 8px 10px;
+  align-items: center;
+  margin: 10px 0 12px 0;
+}
+.form-grid label { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; }
+.form-grid input[type="text"] { width: 100%; font-size: 12.5px; }
+
+.filerow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 4px 0;
+  font-size: 12.5px;
+  border-bottom: 1px solid #2a2a2a;
+}
+.filerow:last-child { border-bottom: none; }
+.filerow .filerow-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filerow .filerow-link { flex: 0 0 auto; font-size: 11.5px; }
+
+/* standalone step glyphs (used outside .step by the file checklists) */
+.glyph { width: 14px; text-align: center; font-weight: 700; }
+.glyph.ok { color: var(--green); }
+.glyph.bad { color: var(--red); }
+.glyph.warn { color: var(--amber); }
+.glyph.run { color: #58a6ff; }
+.glyph.wait { color: var(--dim); }
+.glyph.dim { color: #555; }
+
+a.plainlink { color: #58a6ff; text-decoration: none; }
+a.plainlink:hover { text-decoration: underline; }
+
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #424242; border-radius: 5px; }

@@ -11,7 +11,7 @@
 //!   the IPC bridge failing.
 
 use octocrab::Octocrab;
-use octocrab_core::{cache, client, db::SuiteDb};
+use octocrab_core::{cache, client, contents, db::SuiteDb, pages, raw, templates};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -659,4 +659,491 @@ pub async fn org_details(org: String) -> Cmd {
         "repos_fetched": repos.len(),
         "members_fetched": members_fetched,
     }))
+}
+
+// ------------------------------------------ templates · pages · repo tabs
+
+/// Parse a comma-separated argument into a clean `Vec<String>`
+/// (`"cli, gui ,"` → `["cli", "gui"]`).
+fn csv_list(v: Option<&str>) -> Vec<String> {
+    v.unwrap_or("")
+        .split(',')
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// Split a `owner/repo` target string (the new tabs take the target as one
+/// argument). Anything else is rejected.
+fn split_repo(spec: &str) -> Result<(String, String), Value> {
+    let spec = spec.trim();
+    let parts: Vec<&str> = spec.split('/').map(str::trim).filter(|p| !p.is_empty()).collect();
+    if parts.len() != 2 {
+        return Err(fail(format!("target must be owner/repo — got '{spec}'")));
+    }
+    Ok((parts[0].to_string(), parts[1].to_string()))
+}
+
+/// Static template registry metadata (pure data, no network / no vault).
+#[tauri::command]
+pub fn templates_list() -> Cmd {
+    let templates: Vec<Value> = templates::TEMPLATES
+        .iter()
+        .map(|t| {
+            json!({
+                "key": t.key,
+                "name": t.name,
+                "desc": t.desc,
+                "files": t.files,
+                "gate": t.gate,
+            })
+        })
+        .collect();
+    Ok(json!({ "templates": templates, "total": templates.len() }))
+}
+
+/// One template-install job, shared by `template_install`, the community
+/// scaffold and the site generator.
+struct TemplateJob {
+    key: String,
+    owner: String,
+    repo: String,
+    project: Option<String>,
+    tagline: Option<String>,
+    bins: Option<String>,
+    exclude: Option<String>,
+    contact: Option<String>,
+    message: String,
+}
+
+/// Gate → live repo data → render → `put_file` per file. Mirrors the CLI's
+/// `templates install`: params come from the live repository so rendered
+/// files are repo-tailored. Per-file results are always returned; a single
+/// failing file does not abort the rest.
+async fn run_template(db: SuiteDb, job: TemplateJob) -> Cmd {
+    let def = match templates::template_def(&job.key) {
+        Some(d) => d,
+        None => return Err(fail(format!("unknown template '{}' — see the Templates tab", job.key))),
+    };
+    if !db.module_enabled(def.gate) {
+        return Ok(json!({
+            "ok": false,
+            "error": format!(
+                "template '{}' needs module '{}' — not granted this session",
+                job.key, def.gate
+            ),
+        }));
+    }
+    let (octo, _token) = client_from_db(&db)?;
+
+    // live repo data → template params (same shape as the CLI installer)
+    let repo_json = serde_json::to_value(
+        octo.repos(job.owner.as_str(), job.repo.as_str())
+            .get()
+            .await
+            .map_err(fail)?,
+    )
+    .unwrap_or(Value::Null);
+    let description = s(&repo_json, "description");
+    let default_branch = {
+        let b = s(&repo_json, "default_branch");
+        if b.is_empty() { "main".to_string() } else { b }
+    };
+    let license = repo_json
+        .get("license")
+        .and_then(|l| l.get("spdx_id"))
+        .and_then(Value::as_str)
+        .filter(|sp| *sp != "NOASSERTION")
+        .unwrap_or("MIT")
+        .to_string();
+
+    // the site generator keeps the CLI's release/star flavoured tagline
+    let mut tagline = job.tagline.clone().unwrap_or_default().trim().to_string();
+    if job.key == "site" && tagline.is_empty() {
+        let release_tag = octo
+            .repos(job.owner.as_str(), job.repo.as_str())
+            .releases()
+            .list()
+            .per_page(1u8)
+            .send()
+            .await
+            .ok()
+            .and_then(|p| p.items.first().map(|r| r.tag_name.clone()));
+        let stars = u(&repo_json, "stargazers_count").as_u64().unwrap_or(0);
+        tagline = match (release_tag.as_deref(), stars) {
+            (Some(t), 0) => {
+                format!("latest release {t} — built & shipped with the Octocrab Suite")
+            }
+            (Some(t), n) => {
+                format!("latest release {t} • {n} stars — built & shipped with the Octocrab Suite")
+            }
+            (None, n) => format!("{n} stars — built & shipped with the Octocrab Suite"),
+        };
+    }
+    if tagline.is_empty() {
+        tagline = "built, packaged and shipped by the Octocrab Suite".into();
+    }
+
+    let params = templates::TemplateParams {
+        project: job
+            .project
+            .clone()
+            .map(|p| p.trim().to_string())
+            .filter(|p| !p.is_empty())
+            .unwrap_or_else(|| job.repo.clone()),
+        owner: job.owner.clone(),
+        repo: job.repo.clone(),
+        description,
+        tagline,
+        bins: csv_list(job.bins.as_deref()),
+        branches: vec![default_branch],
+        exclude: csv_list(job.exclude.as_deref()),
+        license,
+        contact: job.contact.clone().unwrap_or_default().trim().to_string(),
+    };
+
+    let files = templates::render(&job.key, &params).map_err(fail)?;
+    let mut results: Vec<Value> = Vec::new();
+    for (path, content) in &files {
+        match contents::put_file(
+            &octo,
+            job.owner.as_str(),
+            job.repo.as_str(),
+            path,
+            content,
+            job.message.as_str(),
+            None,
+        )
+        .await
+        {
+            Ok(url) => results.push(json!({ "path": path, "ok": true, "url": url })),
+            Err(e) => results.push(json!({ "path": path, "ok": false, "error": e.to_string() })),
+        }
+    }
+    let written = results.iter().filter(|r| r["ok"] == json!(true)).count();
+    db.log_event(
+        "template",
+        &format!(
+            "installed template '{}' into {}/{} — {}/{} file(s)",
+            job.key,
+            job.owner,
+            job.repo,
+            written,
+            files.len()
+        ),
+    );
+    Ok(json!({
+        "ok": written == files.len(),
+        "template": job.key,
+        "repo": format!("{}/{}", job.owner, job.repo),
+        "gate": def.gate,
+        "files": results,
+        "written": written,
+        "total": files.len(),
+    }))
+}
+
+/// Install a template into a repository. Gated on the template's own module.
+#[tauri::command]
+pub async fn template_install(
+    key: String,
+    repo: String,
+    project: Option<String>,
+    tagline: Option<String>,
+    bins: Option<String>,
+    exclude: Option<String>,
+) -> Cmd {
+    if let Some(e) = reject_secrets(&[
+        key.as_str(),
+        repo.as_str(),
+        project.as_deref().unwrap_or(""),
+        tagline.as_deref().unwrap_or(""),
+        bins.as_deref().unwrap_or(""),
+        exclude.as_deref().unwrap_or(""),
+    ]) {
+        return Ok(e);
+    }
+    let (owner, name) = split_repo(&repo)?;
+    let db = open_db()?;
+    let message = format!("octocrab-tauri: install '{key}' template");
+    run_template(
+        db,
+        TemplateJob {
+            key,
+            owner,
+            repo: name,
+            project,
+            tagline,
+            bins,
+            exclude,
+            contact: None,
+            message,
+        },
+    )
+    .await
+}
+
+/// Pages configuration. A disabled Pages site is *not* an error payload —
+/// it comes back as `{enabled: false}` so the UI can offer the Enable button.
+#[tauri::command]
+pub async fn pages_info(repo: String) -> Cmd {
+    if let Some(e) = reject_secrets(&[repo.as_str()]) {
+        return Ok(e);
+    }
+    let (owner, name) = split_repo(&repo)?;
+    let db = open_db()?;
+    let (octo, _token) = client_from_db(&db)?;
+    match pages::info(&octo, &owner, &name).await {
+        Ok(v) => Ok(json!({
+            "ok": true,
+            "enabled": true,
+            "owner": owner,
+            "repo": name,
+            "html_url": s(&v, "html_url"),
+            "build_type": s(&v, "build_type"),
+            "status": s(&v, "status"),
+            "cname": v.get("cname").cloned().unwrap_or(Value::Null),
+            "source": v.get("source").cloned().unwrap_or(Value::Null),
+            "protected": v.get("protected").cloned().unwrap_or(Value::Null),
+            "public": v.get("public").cloned().unwrap_or(Value::Null),
+            "pages": v,
+        })),
+        Err(e) => Ok(json!({
+            "ok": true,
+            "enabled": false,
+            "owner": owner,
+            "repo": name,
+            "reason": e.to_string(),
+        })),
+    }
+}
+
+/// Enable Pages with the modern `workflow` build type. Gated on `repo:admin`.
+#[tauri::command]
+pub async fn pages_enable(repo: String) -> Cmd {
+    if let Some(e) = reject_secrets(&[repo.as_str()]) {
+        return Ok(e);
+    }
+    let (owner, name) = split_repo(&repo)?;
+    let db = open_db()?;
+    if !db.module_enabled("repo:admin") {
+        return Ok(json!({
+            "ok": false,
+            "error": "repo:admin module is locked — enabling Pages needs repository administration",
+        }));
+    }
+    let (octo, _token) = client_from_db(&db)?;
+    let v = pages::enable(&octo, &owner, &name).await.map_err(fail)?;
+    db.log_event("pages", &format!("enabled Pages (workflow) on {owner}/{name}"));
+    Ok(json!({
+        "ok": true,
+        "owner": owner,
+        "repo": name,
+        "html_url": s(&v, "html_url"),
+        "build_type": s(&v, "build_type"),
+        "pages": v,
+    }))
+}
+
+/// Request a fresh Pages build, then report the latest build status.
+#[tauri::command]
+pub async fn pages_build(repo: String) -> Cmd {
+    if let Some(e) = reject_secrets(&[repo.as_str()]) {
+        return Ok(e);
+    }
+    let (owner, name) = split_repo(&repo)?;
+    let db = open_db()?;
+    let (octo, _token) = client_from_db(&db)?;
+    pages::request_build(&octo, &owner, &name).await.map_err(fail)?;
+    let build = pages::latest_build(&octo, &owner, &name).await.map_err(fail)?;
+    db.log_event("pages", &format!("requested Pages build for {owner}/{name}"));
+    Ok(json!({
+        "ok": true,
+        "owner": owner,
+        "repo": name,
+        "status": s(&build, "status"),
+        "created_at": s(&build, "created_at"),
+        "updated_at": s(&build, "updated_at"),
+        "commit": s(&build, "commit"),
+        "url": s(&build, "url"),
+        "error": build.get("error").cloned().unwrap_or(Value::Null),
+        "build": build,
+    }))
+}
+
+/// Repository profile + community-health profile (both raw GETs so the JSON
+/// field names stay stable). Community profile 404s are surfaced as null.
+#[tauri::command]
+pub async fn repo_get(repo: String) -> Cmd {
+    if let Some(e) = reject_secrets(&[repo.as_str()]) {
+        return Ok(e);
+    }
+    let (owner, name) = split_repo(&repo)?;
+    let db = open_db()?;
+    let (octo, _token) = client_from_db(&db)?;
+    let (status, repo_v) = raw::raw_get(&octo, &format!("/repos/{owner}/{name}"))
+        .await
+        .map_err(fail)?;
+    if status >= 400 {
+        return Err(fail(format!(
+            "GET /repos/{owner}/{name} failed: HTTP {status}"
+        )));
+    }
+    let (cstatus, community) =
+        raw::raw_get(&octo, &format!("/repos/{owner}/{name}/community/profile"))
+            .await
+            .unwrap_or((404, Value::Null));
+    let community = if cstatus >= 400 { Value::Null } else { community };
+    Ok(json!({
+        "owner": owner,
+        "repo": name,
+        "full_name": s(&repo_v, "full_name"),
+        "description": repo_v.get("description").cloned().unwrap_or(Value::Null),
+        "homepage": s(&repo_v, "homepage"),
+        "topics": repo_v.get("topics").cloned().unwrap_or(json!([])),
+        "default_branch": s(&repo_v, "default_branch"),
+        "license": repo_v.get("license").map(|l| s(l, "spdx_id")).unwrap_or_default(),
+        "html_url": s(&repo_v, "html_url"),
+        "stars": u(&repo_v, "stargazers_count"),
+        "open_issues": u(&repo_v, "open_issues_count"),
+        "private": repo_v.get("private").cloned().unwrap_or(json!(false)),
+        "fork": repo_v.get("fork").cloned().unwrap_or(json!(false)),
+        "has_pages": repo_v.get("has_pages").cloned().unwrap_or(json!(false)),
+        "community": community,
+        "repo_data": repo_v,
+    }))
+}
+
+/// Edit repository settings: description / homepage via PATCH, topics via
+/// PUT. Gated on `repo:admin`. `None` fields are left untouched.
+#[tauri::command]
+pub async fn repo_edit(
+    repo: String,
+    description: Option<String>,
+    homepage: Option<String>,
+    topics: Option<String>,
+) -> Cmd {
+    if let Some(e) = reject_secrets(&[
+        repo.as_str(),
+        description.as_deref().unwrap_or(""),
+        homepage.as_deref().unwrap_or(""),
+        topics.as_deref().unwrap_or(""),
+    ]) {
+        return Ok(e);
+    }
+    let (owner, name) = split_repo(&repo)?;
+    let db = open_db()?;
+    if !db.module_enabled("repo:admin") {
+        return Ok(json!({
+            "ok": false,
+            "error": "repo:admin module is locked — editing repository settings needs administration",
+        }));
+    }
+    let (octo, _token) = client_from_db(&db)?;
+
+    let mut patched = serde_json::Map::new();
+    if let Some(d) = description.clone() {
+        patched.insert("description".into(), json!(d));
+    }
+    if let Some(h) = homepage.clone() {
+        patched.insert("homepage".into(), json!(h.trim()));
+    }
+    if !patched.is_empty() {
+        let (status, body) = raw::raw_send(
+            &octo,
+            "PATCH",
+            &format!("/repos/{owner}/{name}"),
+            Some(Value::Object(patched)),
+        )
+        .await
+        .map_err(fail)?;
+        if status >= 400 {
+            return Err(fail(format!(
+                "PATCH /repos/{owner}/{name} failed: HTTP {status} — {}",
+                body.get("message").and_then(Value::as_str).unwrap_or("no message")
+            )));
+        }
+    }
+    let topic_names = topics.map(|t| csv_list(Some(&t))).unwrap_or_default();
+    if !topic_names.is_empty() {
+        let (status, body) = raw::raw_send(
+            &octo,
+            "PUT",
+            &format!("/repos/{owner}/{name}/topics"),
+            Some(json!({ "names": topic_names })),
+        )
+        .await
+        .map_err(fail)?;
+        if status >= 400 {
+            return Err(fail(format!(
+                "PUT /repos/{owner}/{name}/topics failed: HTTP {status} — {}",
+                body.get("message").and_then(Value::as_str).unwrap_or("no message")
+            )));
+        }
+    }
+    db.log_event(
+        "repo_edit",
+        &format!("edited settings on {owner}/{name} (description/homepage/topics)"),
+    );
+    Ok(json!({
+        "ok": true,
+        "owner": owner,
+        "repo": name,
+        "description": description,
+        "homepage": homepage,
+        "topics": topic_names,
+    }))
+}
+
+/// Scaffold the community-health files (CONTRIBUTING, CoC, SECURITY, issue &
+/// PR templates). Gated on `repo:write` via the template's gate.
+#[tauri::command]
+pub async fn community_scaffold(repo: String, contact: Option<String>) -> Cmd {
+    if let Some(e) = reject_secrets(&[repo.as_str(), contact.as_deref().unwrap_or("")]) {
+        return Ok(e);
+    }
+    let (owner, name) = split_repo(&repo)?;
+    let db = open_db()?;
+    run_template(
+        db,
+        TemplateJob {
+            key: "community".into(),
+            owner,
+            repo: name,
+            project: None,
+            tagline: None,
+            bins: None,
+            exclude: None,
+            contact,
+            message: "octocrab-tauri: scaffold community health files".into(),
+        },
+    )
+    .await
+}
+
+/// Generate the landing site into `site/` from live repo data — the Tauri
+/// twin of `octocrab-cli pages <repo> site`. Gated on `repo:write`.
+#[tauri::command]
+pub async fn site_generate(repo: String, tagline: Option<String>) -> Cmd {
+    if let Some(e) = reject_secrets(&[repo.as_str(), tagline.as_deref().unwrap_or("")]) {
+        return Ok(e);
+    }
+    let (owner, name) = split_repo(&repo)?;
+    let db = open_db()?;
+    run_template(
+        db,
+        TemplateJob {
+            key: "site".into(),
+            owner,
+            repo: name,
+            project: None,
+            tagline,
+            bins: None,
+            exclude: None,
+            contact: None,
+            message: "octocrab-tauri: regenerate landing site".into(),
+        },
+    )
+    .await
 }

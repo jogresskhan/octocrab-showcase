@@ -13,6 +13,9 @@ pub mod widgets;
 pub use highlight::{Lang, HlState, Span};
 pub use panels::editor_tabs::OpenTab;
 pub use panels::explorer::{ExplorerState, TreeItem, TreeKind};
+pub use panels::pages::PagesForm;
+pub use panels::repo::{RepoEdits, RepoForm};
+pub use panels::templates::TemplatesForm;
 
 // ------------------------------------------------------------- data rows
 
@@ -71,4 +74,49 @@ pub struct SearchHit {
     pub path: String,
     pub detail: String,
     pub gh: bool,
+}
+
+/// Per-file push progress (template installs, site generation, scaffolds).
+/// Updated live from the background thread through a shared mutex.
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct FileProgress {
+    pub path: String,
+    pub done: bool,
+    pub ok: bool,
+    /// html_url on success, error text on failure, empty while pending.
+    pub detail: String,
+}
+
+/// GitHub Pages digest (info + latest build), rendered by the Pages panel.
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct PagesStatus {
+    pub enabled: bool,
+    pub html_url: String,
+    pub build_type: String,
+    /// Pages config status ("built" | "building" …).
+    pub status: String,
+    /// Latest build status ("built" | "building" | "errored" …).
+    pub build_status: String,
+    /// Set when Pages is disabled (404) or the info call failed.
+    pub error: Option<String>,
+}
+
+/// Digest of GET /repos/{owner}/{repo} for the Repo panel.
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct RepoOverview {
+    pub description: String,
+    pub homepage: String,
+    pub topics: Vec<String>,
+    pub stars: u64,
+    pub license: String,
+    pub default_branch: String,
+    pub html_url: String,
+}
+
+/// Digest of GET /repos/{owner}/{repo}/community/profile.
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct CommunityHealth {
+    pub health_percent: u64,
+    /// (pretty name, present) — fixed checklist order.
+    pub files: Vec<(String, bool)>,
 }

@@ -5,7 +5,6 @@ use egui::{Align2, Color32, FontId, RichText, ScrollArea, Sense, Ui};
 
 use crate::highlight::{self, Lang, Span};
 use crate::theme;
-use crate::widgets;
 
 const CODE_FONT_SIZE: f32 = 12.5;
 

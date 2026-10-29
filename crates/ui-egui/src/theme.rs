@@ -33,16 +33,16 @@ pub fn apply(ctx: &Context) {
     v.override_text_color = Some(TEXT);
     v.hyperlink_color = ACCENT;
     v.selection.bg_fill = ACCENT.gamma_multiply(0.40);
-    v.selection.stroke = egui::Stroke::new(0.5, ACCENT);
-    v.window_stroke = egui::Stroke::new(1.0, BORDER);
+    v.selection.stroke = egui::Stroke::new(0.5_f32, ACCENT);
+    v.window_stroke = egui::Stroke::new(1.0_f32, BORDER);
     v.widgets.noninteractive.bg_fill = BG;
-    v.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0, TEXT);
+    v.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0_f32, TEXT);
     v.widgets.inactive.bg_fill = SIDEBAR;
-    v.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, TEXT);
+    v.widgets.inactive.fg_stroke = egui::Stroke::new(1.0_f32, TEXT);
     v.widgets.hovered.bg_fill = Color32::from_rgb(0x2a, 0x2d, 0x2e);
-    v.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, WHITE);
+    v.widgets.hovered.fg_stroke = egui::Stroke::new(1.0_f32, WHITE);
     v.widgets.active.bg_fill = ACCENT.gamma_multiply(0.55);
-    v.widgets.active.fg_stroke = egui::Stroke::new(1.0, WHITE);
+    v.widgets.active.fg_stroke = egui::Stroke::new(1.0_f32, WHITE);
     style.visuals = v;
 
     style.spacing.item_spacing = egui::vec2(8.0, 4.0);

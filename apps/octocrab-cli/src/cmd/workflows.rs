@@ -245,6 +245,105 @@ pub async fn trigger(
     Ok(())
 }
 
+/// Deep one-shot trace of a run — every job and every step with
+/// started→completed timestamps, durations and conclusions. Serves the
+/// payload from the vault cache when available, like `run` does.
+pub async fn trace(full_name: String, run_id: u64, json: bool) -> Result<()> {
+    let (db, octo) = open_client()?;
+    let (owner, repo) = split_repo(&full_name)?;
+    let cache_key = format!("run:{owner}/{repo}:{run_id}");
+    let payload: serde_json::Value =
+        match octocrab_core::cache::get_json::<serde_json::Value>(&db, &cache_key) {
+            Some(v) => v,
+            None => {
+                let run = octo
+                    .workflows(&owner, &repo)
+                    .get(octocrab::models::RunId(run_id))
+                    .await?;
+                let jobs = octo
+                    .workflows(&owner, &repo)
+                    .list_jobs(octocrab::models::RunId(run_id))
+                    .per_page(100)
+                    .send()
+                    .await?;
+                let payload = serde_json::json!({ "run": run, "jobs": jobs.items });
+                octocrab_core::cache::set_json(&db, &cache_key, &payload, octocrab_core::cache::TTL_LONG);
+                payload
+            }
+        };
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    let run = &payload["run"];
+    println!(
+        "{} trace {}#{} — {}",
+        run_icon(
+            run.get("status").and_then(|v| v.as_str()).unwrap_or(""),
+            run.get("conclusion").and_then(|v| v.as_str()).map(String::from)
+        ),
+        bold(&full_name),
+        run.get("run_number").and_then(|v| v.as_i64()).unwrap_or(0),
+        bold(run.get("name").and_then(|v| v.as_str()).unwrap_or("workflow"))
+    );
+    println!(
+        "event: {} • attempt: {} • sha: {}",
+        run.get("event").and_then(|v| v.as_str()).unwrap_or("—"),
+        run.get("run_attempt").and_then(|v| v.as_i64()).unwrap_or(1),
+        dim(&trunc(run.get("head_sha").and_then(|v| v.as_str()).unwrap_or("—"), 10))
+    );
+    println!();
+    if let Some(jobs) = payload.get("jobs").and_then(|j| j.as_array()) {
+        for job in jobs {
+            let name = job.get("name").and_then(|v| v.as_str()).unwrap_or("job");
+            let status = job.get("status").and_then(|v| v.as_str()).unwrap_or("");
+            let conclusion = job.get("conclusion").and_then(|v| v.as_str()).map(String::from);
+            println!(
+                "{} {} — started {} • ended {} • {}",
+                run_icon(status, conclusion.clone()),
+                bold(&format!("job: {name}")),
+                dim(&fmt_clock(job.get("started_at").and_then(|v| v.as_str()))),
+                dim(&fmt_clock(job.get("completed_at").and_then(|v| v.as_str()))),
+                dim(&fmt_duration(diff_secs(
+                    job.get("started_at").and_then(|v| v.as_str()),
+                    job.get("completed_at").and_then(|v| v.as_str()),
+                )))
+            );
+            if let Some(steps) = job.get("steps").and_then(|s| s.as_array()) {
+                let last = steps.len().saturating_sub(1);
+                for (i, step) in steps.iter().enumerate() {
+                    let sname = step.get("name").and_then(|v| v.as_str()).unwrap_or("step");
+                    let sstatus = step.get("status").and_then(|v| v.as_str()).unwrap_or("");
+                    let sconcl = step.get("conclusion").and_then(|v| v.as_str()).map(String::from);
+                    let branch = if i == last { "└─" } else { "├─" };
+                    println!(
+                        "   {branch} {} {} {} → {} {}",
+                        run_icon(sstatus, sconcl),
+                        trunc(sname, 44),
+                        dim(&fmt_clock(step.get("started_at").and_then(|v| v.as_str()))),
+                        dim(&fmt_clock(step.get("completed_at").and_then(|v| v.as_str()))),
+                        dim(&fmt_duration(diff_secs(
+                            step.get("started_at").and_then(|v| v.as_str()),
+                            step.get("completed_at").and_then(|v| v.as_str()),
+                        )))
+                    );
+                }
+            }
+            println!();
+        }
+    }
+    Ok(())
+}
+
+/// RFC3339 → HH:MM:SS for trace timelines.
+fn fmt_clock(ts: Option<&str>) -> String {
+    ts.and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|d| d.format("%H:%M:%S").to_string())
+        .unwrap_or_else(|| "—".into())
+}
+
 pub async fn watch(full_name: String, run_id: u64, interval: u64) -> Result<()> {
     let (db, octo) = open_client()?;
     let (owner, repo) = split_repo(&full_name)?;

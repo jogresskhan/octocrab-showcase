@@ -23,6 +23,15 @@ fn main() {
             commands::list_repos,
             commands::list_orgs,
             commands::org_details,
+            commands::templates_list,
+            commands::template_install,
+            commands::pages_info,
+            commands::pages_enable,
+            commands::pages_build,
+            commands::repo_get,
+            commands::repo_edit,
+            commands::community_scaffold,
+            commands::site_generate,
         ])
         .run(tauri::generate_context!())
         .expect("error while running octocrab-tauri");

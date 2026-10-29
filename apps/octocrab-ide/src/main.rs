@@ -7,6 +7,7 @@
 mod app;
 mod fuzzy;
 mod net;
+mod selftest;
 
 use std::sync::{Arc, Mutex};
 
@@ -29,6 +30,16 @@ fn open_db() -> Arc<Mutex<SuiteDb>> {
 
 fn main() -> Result<(), eframe::Error> {
     let selftest = std::env::args().any(|a| a == "--selftest");
+
+    if selftest {
+        // 1) offline render checks: every new panel, canned data, no network
+        if let Err(e) = selftest::run_offline_panel_checks() {
+            eprintln!("octocrab-ide --selftest: offline panel checks FAILED: {e}");
+            std::process::exit(2);
+        }
+        eprintln!("octocrab-ide --selftest: offline panel checks passed");
+    }
+
     let db = open_db();
 
     // Create the shared tokio runtime up front so background promises can
