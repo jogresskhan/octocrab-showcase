@@ -79,6 +79,16 @@ octocrab-cli achievements show | boost --yes      # profile enrichment, first re
                                                   # quickdraw issue, merged PR (Pull Shark
                                                   # + YOLO), stars, gist
 octocrab-cli setup --yes --org <login>            # one-shot wizard
+octocrab-cli workflows trace <o/r> <run_id>       # deep trace: every job+step with timestamps
+octocrab-cli templates list                       # data-driven repo templates
+octocrab-cli templates install ci|release|pages|site|community|readme <o/r> \
+    --bins octocrab-cli,octocrab-ide --exclude octocrab-tauri
+                                                  # multi-OS CI, 4-target packaging+release,
+                                                  # pages deploy, landing site, community kit
+octocrab-cli pages <o/r> info | enable | build    # GitHub Pages (workflow build type)
+octocrab-cli pages <o/r> site                     # landing site from live repo data
+octocrab-cli repos edit <o/r> --desc --homepage --topics   # repo page settings
+octocrab-cli repos community <o/r>                # community health / contribution status
 octocrab-cli api <route>                          # raw GET passthrough
 octocrab-cli api --method PUT <route>             # module-gated write verbs
                                                   # (--data '{"k":"v"}', gate:
