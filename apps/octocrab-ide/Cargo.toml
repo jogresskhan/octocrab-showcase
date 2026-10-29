@@ -1,0 +1,28 @@
+[package]
+name = "octocrab-ide"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Data-driven VSCode-style IDE in pure Rust (egui)"
+
+[[bin]]
+name = "octocrab-ide"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+octocrab-core.workspace = true
+octocrab-ui-egui = { path = "../../crates/ui-egui" }
+octocrab.workspace = true
+eframe.workspace = true
+egui.workspace = true
+poll-promise.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+walkdir = "2"
+base64.workspace = true
+chrono.workspace = true

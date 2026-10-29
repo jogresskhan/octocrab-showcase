@@ -1,0 +1,25 @@
+[package]
+name = "octocrab-tauri"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Tauri control center for workflows / releases / tags — Octocrab Suite"
+
+[[bin]]
+name = "octocrab-tauri"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[lints]
+workspace = true
+
+[dependencies]
+octocrab-core.workspace = true
+octocrab.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tauri = { version = "2", features = [] }

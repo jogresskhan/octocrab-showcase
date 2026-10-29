@@ -1,0 +1,5 @@
+/target
+/apps/octocrab-tauri/gen
+*.db
+*.db-journal
+.DS_Store

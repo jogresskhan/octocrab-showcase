@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "Default capability for the Octocrab Control Center main window. Custom app commands live in the app ACL; core:* grants the bundled core plugin APIs.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

@@ -1,0 +1,23 @@
+[package]
+name = "octocrab-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Core library for the Octocrab Suite: database, token vault, capability modules, client builder"
+
+[lints]
+workspace = true
+
+[dependencies]
+octocrab.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rusqlite.workspace = true
+aes-gcm.workspace = true
+rand.workspace = true
+anyhow.workspace = true
+chrono.workspace = true
+dirs.workspace = true
+base64.workspace = true
+http.workspace = true
