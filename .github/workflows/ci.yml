@@ -2,7 +2,8 @@ name: Suite CI
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       note:
@@ -17,7 +18,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Say hello
-        run: echo "octocrab suite: ${{ github.event_name }} event"
+        run: echo "octocrab suite: "octocrab suite: ${GITHUB_EVENT_NAME:-dispatch} event""
       - name: Probe system
         run: uname -a && date -u
       - name: Final check
