@@ -128,6 +128,12 @@ pub async fn fetch_tree(
     Ok((TreeItem::build_from_paths(&paths), tree.truncated))
 }
 
+/// Hard per-file size cap for the editor (local *and* GitHub sources).
+/// Mirrors the previous local-only 2 MB guard — without it a single huge
+/// file fetched over the Contents API would balloon RAM (and its
+/// JSON-serialized SQLite cache copy even more).
+pub const MAX_FILE_BYTES: usize = 2_000_000;
+
 pub async fn fetch_file(
     octo: &Arc<Octocrab>,
     owner: &str,
@@ -143,6 +149,10 @@ pub async fn fetch_file(
         .into_iter()
         .next()
         .ok_or_else(|| anyhow!("empty contents response"))?;
+    // declared size first (cheap), decoded length as the authoritative check
+    if first.size.max(0) as usize > MAX_FILE_BYTES {
+        bail!("file larger than 2MB ({path})");
+    }
     // base64 payload may contain newlines — strip all whitespace first.
     let raw = first.content.unwrap_or_default();
     let cleaned: String = raw.chars().filter(|c| !c.is_whitespace()).collect();
@@ -150,6 +160,9 @@ pub async fn fetch_file(
     let bytes = base64::prelude::BASE64_STANDARD
         .decode(cleaned.as_bytes())
         .map_err(|e| anyhow!("base64 decode failed: {e}"))?;
+    if bytes.len() > MAX_FILE_BYTES {
+        bail!("file larger than 2MB ({path})");
+    }
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 

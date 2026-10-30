@@ -3,7 +3,7 @@
 //! plumbing. Every GitHub call runs on a background thread; the UI renders
 //! instantly from cached data.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use egui::{Color32, Context, Key, RichText, Ui};
@@ -104,6 +104,10 @@ where
 const LOCAL_ROOT: &str = "/home/z/octocrab-suite";
 const SELFTEST_MARKER: &str = "/tmp/octocrab-ide-selftest-ok";
 const RUNS_LIMIT: usize = 20;
+/// RAM ceiling for the in-session editor file cache. Contents beyond this
+/// budget are evicted (oldest first, never the files behind open tabs) so a
+/// long browsing session can no longer grow until the process OOMs.
+const FILE_CACHE_BUDGET: usize = 32 * 1024 * 1024;
 
 /// poll-promise 0.3 `take()` hands back a reference — copy it out so the
 /// polling code can work with owned values.
@@ -220,6 +224,10 @@ pub struct IdeApp {
     tabs: Vec<OpenTab>,
     active_tab: Option<usize>,
     file_cache: HashMap<String, String>,
+    /// Insertion order for `file_cache` (oldest first) + live byte count —
+    /// the two knobs the eviction below needs.
+    file_cache_order: VecDeque<String>,
+    file_cache_bytes: usize,
     file_inflight: HashSet<String>,
     file_ps: HashMap<String, Promise<FileFetch>>,
     hl_cache: Option<(String, u64, Vec<Vec<Span>>)>,
@@ -352,6 +360,8 @@ impl IdeApp {
             tabs: vec![],
             active_tab: None,
             file_cache: HashMap::new(),
+            file_cache_order: VecDeque::new(),
+            file_cache_bytes: 0,
             file_inflight: HashSet::new(),
             file_ps: HashMap::new(),
             hl_cache: None,
@@ -554,7 +564,9 @@ impl IdeApp {
                     spawn(move || {
                         let p = std::path::Path::new(&path);
                         match std::fs::metadata(p) {
-                            Ok(m) if m.len() > 2_000_000 => Err("file larger than 2MB".into()),
+                            Ok(m) if m.len() as usize > net::MAX_FILE_BYTES => {
+                                Err("file larger than 2MB".into())
+                            }
                             Ok(_) => std::fs::read_to_string(p)
                                 .map(|c| (path.clone(), c))
                                 .map_err(|e| format!("read failed: {e}")),
@@ -582,7 +594,7 @@ impl IdeApp {
                 };
                 if let Some(content) = cached {
                     self.cache_hits += 1;
-                    self.file_cache.insert(path.clone(), content);
+                    self.file_cache_insert(path.clone(), content);
                     self.hl_cache = None;
                 }
                 let Some(octo) = self.octo.clone() else {
@@ -614,6 +626,52 @@ impl IdeApp {
         }
     }
 
+    // ------------------------------------------------- file cache (RAM)
+
+    /// Insert a fetched file into the session cache, then evict down to
+    /// [`FILE_CACHE_BUDGET`]. The cache used to be a plain unbounded
+    /// `HashMap` — every file ever opened stayed in RAM for the whole
+    /// session, which is what filled memory until the app OOM-killed.
+    fn file_cache_insert(&mut self, path: String, content: String) {
+        if let Some(old) = self.file_cache.get(&path) {
+            self.file_cache_bytes = self.file_cache_bytes.saturating_sub(old.len());
+        }
+        self.file_cache_bytes += content.len();
+        self.file_cache.insert(path.clone(), content);
+        self.file_cache_order.retain(|p| *p != path);
+        self.file_cache_order.push_back(path);
+        self.file_cache_evict();
+    }
+
+    /// Drop the oldest cached contents that do **not** back an open tab
+    /// until the budget is met. If every cached file is on screen there is
+    /// nothing to free — growth is then bounded by the 2 MB per-file cap.
+    fn file_cache_evict(&mut self) {
+        while self.file_cache_bytes > FILE_CACHE_BUDGET {
+            let victim = self
+                .file_cache_order
+                .iter()
+                .find(|p| !self.tabs.iter().any(|t| &t.path == *p))
+                .cloned();
+            match victim {
+                Some(v) => {
+                    self.file_cache_order.retain(|p| *p != v);
+                    if let Some(c) = self.file_cache.remove(&v) {
+                        self.file_cache_bytes = self.file_cache_bytes.saturating_sub(c.len());
+                    }
+                }
+                None => break,
+            }
+        }
+    }
+
+    /// Wipe the session file cache (branch / repository switch).
+    fn file_cache_reset(&mut self) {
+        self.file_cache.clear();
+        self.file_cache_order.clear();
+        self.file_cache_bytes = 0;
+    }
+
     fn close_tab(&mut self, idx: usize) {
         if idx < self.tabs.len() {
             self.tabs.remove(idx);
@@ -637,7 +695,7 @@ impl IdeApp {
     }
 
     fn on_branch_changed(&mut self) {
-        self.file_cache.clear();
+        self.file_cache_reset();
         self.hl_cache = None;
         self.tree.clear();
         self.exp = explorer::ExplorerState::default();
@@ -1278,7 +1336,7 @@ impl IdeApp {
                         self.branch = info.default_branch.clone();
                         let had_repo = self.repo.is_some();
                         self.repo = Some(info.clone());
-                        self.file_cache.clear();
+                        self.file_cache_reset();
                         self.hl_cache = None;
                         if had_repo || self.source == Source::Github {
                             self.tree.clear();
@@ -1320,7 +1378,7 @@ impl IdeApp {
                 self.file_inflight.remove(&path);
                 match res {
                     Some(Ok((p2, content))) => {
-                        self.file_cache.insert(p2.clone(), content);
+                        self.file_cache_insert(p2.clone(), content);
                         if let Some(t) = self.tabs.iter_mut().find(|t| t.path == p2) {
                             t.loading = false;
                         }
