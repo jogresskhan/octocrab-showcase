@@ -76,6 +76,11 @@ impl SuiteDb {
             path: path.to_path_buf(),
         };
         db.migrate()?;
+        // Bounded-storage maintenance: expired cache rows and old audit
+        // events are deleted once per process start so the vault db can
+        // never grow without bound across sessions (long IDE/CLI sessions
+        // used to accumulate every fetched file/run payload forever).
+        db.maintain()?;
         Ok(db)
     }
 
@@ -508,5 +513,149 @@ impl SuiteDb {
     pub fn require_active_token(&self) -> Result<String> {
         self.active_token()?
             .ok_or_else(|| anyhow!("no active token stored — run: octocrab-cli auth set"))
+    }
+
+    // ---------------------------------------------------- maintenance
+
+    /// Delete cache rows whose TTL has already lapsed. `cache_get` filters
+    /// them out on read but never removes them — without this sweep the
+    /// table grows by one row per fetched file / run / tree, forever.
+    pub fn cache_purge_expired(&self) -> Result<usize> {
+        let n = self.conn.execute(
+            "DELETE FROM cache WHERE expires_at <= ?1",
+            params![crate::now()],
+        )?;
+        Ok(n)
+    }
+
+    /// Keep only the `keep` freshest cache rows (largest `expires_at`).
+    /// Caps the table even when everything is still un-expired.
+    pub fn cache_trim(&self, keep: usize) -> Result<usize> {
+        let n = self.conn.execute(
+            "DELETE FROM cache WHERE key NOT IN \
+             (SELECT key FROM cache ORDER BY expires_at DESC, key LIMIT ?1)",
+            params![keep as i64],
+        )?;
+        Ok(n)
+    }
+
+    /// Keep only the newest `keep` audit events.
+    pub fn events_trim(&self, keep: usize) -> Result<usize> {
+        let n = self.conn.execute(
+            "DELETE FROM events WHERE id NOT IN \
+             (SELECT id FROM events ORDER BY id DESC LIMIT ?1)",
+            params![keep as i64],
+        )?;
+        Ok(n)
+    }
+
+    /// Once-per-open housekeeping: purge + trim + checkpoint the WAL so the
+    /// vault db (and its `-wal` sidecar) stay bounded no matter how long or
+    /// how many sessions wrote to them.
+    pub fn maintain(&self) -> Result<()> {
+        self.cache_purge_expired()?;
+        self.cache_trim(Self::CACHE_MAX_ROWS)?;
+        self.events_trim(Self::EVENTS_MAX_ROWS)?;
+        // `PRAGMA wal_checkpoint` returns a row — consume it so the
+        // statement is not treated as an error.
+        let _ = self
+            .conn
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()));
+        Ok(())
+    }
+
+    /// Hard cap on cached payload rows (files, trees, runs, jobs, …).
+    const CACHE_MAX_ROWS: usize = 4_000;
+    /// Hard cap on audit events kept in `events`.
+    const EVENTS_MAX_ROWS: usize = 1_000;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_db() -> SuiteDb {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static SEQ: AtomicUsize = AtomicUsize::new(0);
+        let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "octocrab-db-test-{pid}-{ts}-{seq}",
+            pid = std::process::id(),
+            ts = crate::now(),
+            seq = seq
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let db = SuiteDb::open_at(&dir.join("test.db")).expect("open temp db");
+        let _ = std::fs::remove_dir_all(&dir);
+        db
+    }
+
+    #[test]
+    fn cache_purge_expired_removes_only_lapsed_rows() {
+        let db = temp_db();
+        let t = crate::now();
+        db.conn
+            .execute(
+                "INSERT INTO cache(key, value, expires_at) VALUES('gone','x',?1),('kept','y',?2)",
+                params![t - 10, t + 3_600],
+            )
+            .unwrap();
+        assert_eq!(db.cache_purge_expired().unwrap(), 1);
+        assert!(db.cache_get("kept").is_some());
+        assert!(db.cache_get("gone").is_none());
+    }
+
+    #[test]
+    fn cache_trim_keeps_freshest_rows() {
+        let db = temp_db();
+        let t = crate::now();
+        for i in 0..10 {
+            db.conn
+                .execute(
+                    "INSERT INTO cache(key, value, expires_at) VALUES(?1,'v',?2)",
+                    params![format!("k{i}"), t + i],
+                )
+                .unwrap();
+        }
+        assert_eq!(db.cache_trim(3).unwrap(), 7);
+        let left: Vec<String> = {
+            let mut stmt = db
+                .conn
+                .prepare("SELECT key FROM cache ORDER BY key")
+                .unwrap();
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0)).unwrap();
+            rows.filter_map(|r| r.ok()).collect()
+        };
+        assert_eq!(
+            left,
+            vec!["k7".to_string(), "k8".to_string(), "k9".to_string()]
+        );
+    }
+
+    #[test]
+    fn events_trim_keeps_newest() {
+        let db = temp_db();
+        for i in 0..8 {
+            db.log_event("test", &format!("e{i}"));
+        }
+        assert_eq!(db.events_trim(3).unwrap(), 5);
+        let evts = db.events(10);
+        assert_eq!(evts.len(), 3);
+        assert_eq!(evts[0].2, "e7");
+    }
+
+    #[test]
+    fn maintain_is_idempotent_and_keeps_db_usable() {
+        let db = temp_db();
+        db.cache_set("live", "payload", 60).unwrap();
+        for i in 0..5 {
+            db.log_event("boot", &format!("n{i}"));
+        }
+        db.maintain().unwrap();
+        db.maintain().unwrap();
+        assert!(db.cache_get("live").is_some());
+        assert_eq!(db.events(100).len(), 5);
+        db.set_meta("k", "v").unwrap();
+        assert_eq!(db.get_meta("k").as_deref(), Some("v"));
     }
 }
