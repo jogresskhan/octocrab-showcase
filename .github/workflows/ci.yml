@@ -6,9 +6,19 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Rapid pushes stack runs; cancel the superseded ones so queued macOS
+# runners (a scarce, occasionally flaky pool) go to the newest commit.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: check+test (${{ matrix.os }})
+    # Hosted runners sometimes boot but never pick the job up (observed on
+    # macOS: started, zero steps, hangs until manually cancelled). A job
+    # timeout turns that into a legible, retryable failure instead.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -27,6 +37,7 @@ jobs:
         run: cargo test --workspace --exclude octocrab-tauri
 
   lint:
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

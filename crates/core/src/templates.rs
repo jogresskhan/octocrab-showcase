@@ -193,9 +193,19 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Rapid pushes stack runs; cancel the superseded ones so queued macOS
+# runners (a scarce, occasionally flaky pool) go to the newest commit.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: check+test (${{ matrix.os }})
+    # Hosted runners sometimes boot but never pick the job up (observed on
+    # macOS: started, zero steps, hangs until manually cancelled). A job
+    # timeout turns that into a legible, retryable failure instead.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -214,6 +224,7 @@ jobs:
         run: cargo test --workspace@EXCLUDE_FLAGS@
 
   lint:
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -245,6 +256,9 @@ permissions:
 jobs:
   build:
     name: package (${{ matrix.target }})
+    # A hosted runner that never starts executing steps must not be able to
+    # wedge a tagged release for hours — cap every package job.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -298,6 +312,7 @@ jobs:
 
   release:
     needs: build
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - name: Collect bundles
@@ -337,6 +352,7 @@ concurrency:
 
 jobs:
   deploy:
+    timeout-minutes: 10
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -675,3 +691,55 @@ Please note the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 Distributed under the @LICENSE@ license — see `LICENSE` for details.
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn params() -> TemplateParams {
+        TemplateParams {
+            project: "Demo".into(),
+            owner: "octocrab".into(),
+            repo: "demo".into(),
+            bins: vec!["demo-cli".into()],
+            exclude: vec!["demo-tauri".into()],
+            ..Default::default()
+        }
+    }
+
+    fn rendered_file(key: &str, suffix: &str) -> String {
+        let files = render(key, &params()).expect("render");
+        files
+            .iter()
+            .find(|(p, _)| p.ends_with(suffix))
+            .map(|(_, c)| c.clone())
+            .unwrap_or_else(|| panic!("template '{key}' must emit a *{suffix} file"))
+    }
+
+    /// Every workflow template must cap its jobs — a hosted runner that
+    /// boots but never picks the job up must fail legibly, not wedge the
+    /// pipeline until someone cancels it by hand.
+    #[test]
+    fn workflow_templates_carry_job_timeouts() {
+        let ci = rendered_file("ci", "ci.yml");
+        assert_eq!(
+            ci.matches("timeout-minutes:").count(),
+            2,
+            "ci.yml: build + lint"
+        );
+        assert!(
+            ci.contains("concurrency:"),
+            "ci.yml must cancel superseded runs"
+        );
+
+        let release = rendered_file("release", "release.yml");
+        assert_eq!(
+            release.matches("timeout-minutes:").count(),
+            2,
+            "release.yml: package + release"
+        );
+
+        let pages = rendered_file("pages", "pages.yml");
+        assert!(pages.contains("timeout-minutes:"), "pages.yml: deploy");
+    }
+}

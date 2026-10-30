@@ -11,6 +11,9 @@ permissions:
 jobs:
   build:
     name: package (${{ matrix.target }})
+    # A hosted runner that never starts executing steps must not be able to
+    # wedge a tagged release for hours — cap every package job.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -64,6 +67,7 @@ jobs:
 
   release:
     needs: build
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - name: Collect bundles
