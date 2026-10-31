@@ -327,9 +327,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${{ github.ref_name }}" dist/* \
+            --repo "${{ github.repository }}" \
             --title "@PROJECT@ ${{ github.ref_name }}" \
             --generate-notes \
-            || gh release upload "${{ github.ref_name }}" dist/* --clobber
+            || gh release upload "${{ github.ref_name }}" dist/* --repo "${{ github.repository }}" --clobber
 "#;
 
 // ------------------------------------------------------------------ pages
@@ -737,6 +738,12 @@ mod tests {
             release.matches("timeout-minutes:").count(),
             2,
             "release.yml: package + release"
+        );
+        // the publish job runs without a checkout — gh needs --repo to
+        // know where to publish (the v0.1.2 run failed on exactly this)
+        assert!(
+            release.contains("--repo \"${{ github.repository }}\""),
+            "release.yml must pass --repo to gh (no git context in the job)"
         );
 
         let pages = rendered_file("pages", "pages.yml");
