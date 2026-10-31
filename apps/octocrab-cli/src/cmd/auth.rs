@@ -54,9 +54,12 @@ pub async fn set(label: String, stdin: bool, file: Option<String>) -> Result<()>
 
 pub async fn status(json: bool) -> Result<()> {
     let db = SuiteDb::open()?;
+    // which source feeds the suite right now (embedded/vault/file/env)
+    let source = octocrab_core::client::resolve_token(&db).map(|(_, s)| s);
     if json {
         let v = serde_json::json!({
             "db": db.path().display().to_string(),
+            "token_source": source,
             "tokens": db.list_tokens(),
             "login": db.get_meta("auth_login"),
             "kind": db.get_meta("auth_kind"),
@@ -66,6 +69,9 @@ pub async fn status(json: bool) -> Result<()> {
         });
         println!("{}", serde_json::to_string_pretty(&v)?);
         return Ok(());
+    }
+    if let Some(src) = source {
+        println!("token source: {src}");
     }
     let tokens = db.list_tokens();
     if tokens.is_empty() {
@@ -103,7 +109,7 @@ pub async fn status(json: bool) -> Result<()> {
 
 pub async fn check(json: bool) -> Result<()> {
     let db = SuiteDb::open()?;
-    let (octo, _token) = octocrab_core::client::from_db(&db)?;
+    let (octo, _token) = octocrab_core::client::from_any_source(&db)?;
     println!("{}", dim("probing token capabilities (zero side effects)…"));
     let report = caps::check(&octo, &db).await?;
     if json {
@@ -188,7 +194,7 @@ pub async fn tokens() -> Result<()> {
 /// Shared helper used by every other command.
 pub fn open_client() -> Result<(SuiteDb, std::sync::Arc<Octocrab>)> {
     let db = SuiteDb::open()?;
-    let (octo, _t) = octocrab_core::client::from_db(&db)?;
+    let (octo, _t) = octocrab_core::client::from_any_source(&db)?;
     Ok((db, octo))
 }
 
@@ -233,7 +239,7 @@ pub fn git_credential(op: &str) -> Result<()> {
     }
 
     let db = SuiteDb::open()?;
-    let (_octo, token) = octocrab_core::client::from_db(&db)?;
+    let (_octo, token) = octocrab_core::client::from_any_source(&db)?;
     let username = db
         .get_meta("auth_login")
         .filter(|s| !s.is_empty())
